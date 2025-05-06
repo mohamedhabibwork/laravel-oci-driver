@@ -65,7 +65,7 @@ class LaravelOciDriverServiceProvider extends PackageServiceProvider
         Storage::extend('oci', function ($app, $config) {
             $client = OciClient::createWithConfiguration($config);
             $adapter = new OciAdapter($client);
-            
+
             $filesystemAdapter = new FilesystemAdapter(
                 driver: new Filesystem(
                     adapter: $adapter,
@@ -73,7 +73,7 @@ class LaravelOciDriverServiceProvider extends PackageServiceProvider
                 adapter: $adapter,
                 config: $config
             );
-            
+
             $filesystemAdapter->buildTemporaryUrlsUsing(function (
                 string $path,
                 \DateTimeInterface $expiresAt,

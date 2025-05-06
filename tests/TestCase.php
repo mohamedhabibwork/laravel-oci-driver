@@ -2,8 +2,8 @@
 
 namespace LaravelOCI\LaravelOciDriver\Tests;
 
-use Orchestra\Testbench\TestCase as Orchestra;
 use LaravelOCI\LaravelOciDriver\LaravelOciDriverServiceProvider;
+use Orchestra\Testbench\TestCase as Orchestra;
 
 class TestCase extends Orchestra
 {

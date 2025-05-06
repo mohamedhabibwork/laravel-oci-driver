@@ -2,16 +2,16 @@
 
 namespace LaravelOCI\LaravelOciDriver;
 
-use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
-use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
-use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
-use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
 use Carbon\Carbon;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\RequestOptions;
 use Illuminate\Support\Facades\Log;
+use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
+use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
+use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
+use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
 use Ramsey\Uuid\Uuid;
 
 final readonly class OciClient
@@ -21,8 +21,7 @@ final readonly class OciClient
      */
     private function __construct(
         private array $config,
-    ) {
-    }
+    ) {}
 
     /**
      * Create a new instance with the given configuration.
@@ -31,7 +30,7 @@ final readonly class OciClient
     {
         $instance = new self($config);
         $instance->validateConfiguration();
-        
+
         return $instance;
     }
 
@@ -43,13 +42,13 @@ final readonly class OciClient
     private function validateConfiguration(): void
     {
         $requiredKeys = [
-            'namespace', 'region', 'bucket', 'tenancy_id', 
+            'namespace', 'region', 'bucket', 'tenancy_id',
             'user_id', 'storage_tier', 'key_fingerprint', 'key_path',
         ];
-        
+
         $missingKeys = array_diff($requiredKeys, array_keys($this->config));
-        
-        if (!empty($missingKeys)) {
+
+        if (! empty($missingKeys)) {
             throw new \InvalidArgumentException(
                 sprintf('Missing required configuration keys: %s', implode(', ', $missingKeys))
             );
@@ -83,10 +82,10 @@ final readonly class OciClient
      * @throws GuzzleException
      */
     public function send(
-        string $uri, 
-        string $method, 
-        array $header = [], 
-        ?string $body = null, 
+        string $uri,
+        string $method,
+        array $header = [],
+        ?string $body = null,
         ?string $contentType = 'application/json'
     ) {
         $authorizationHeaders = $this->getAuthorizationHeaders($uri, $method, $body, $contentType);
@@ -120,6 +119,7 @@ final readonly class OciClient
 
             if ($response->getStatusCode() === 200) {
                 $preAuthenticatedRequest = json_decode($response->getBody()->getContents());
+
                 return $preAuthenticatedRequest->fullPath;
             }
         } catch (GuzzleException $exception) {
@@ -180,9 +180,9 @@ final readonly class OciClient
      * @throws SigningValidationFailedException
      */
     public function getAuthorizationHeaders(
-        string $uri, 
-        string $method, 
-        ?string $body = null, 
+        string $uri,
+        string $method,
+        ?string $body = null,
         string $contentType = 'application/json'
     ): array {
         $headers = [];

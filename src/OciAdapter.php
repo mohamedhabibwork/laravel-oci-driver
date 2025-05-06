@@ -16,15 +16,14 @@ use League\Flysystem\UnableToWriteFile;
 final readonly class OciAdapter implements FilesystemAdapter
 {
     /**
-     * @param OciClient $client OCI client for API requests
+     * @param  OciClient  $client  OCI client for API requests
      */
     public function __construct(private OciClient $client) {}
 
     /**
      * Check if a file exists at the given path
      *
-     * @param string $path File path
-     *
+     * @param  string  $path  File path
      * @return bool True if file exists, false otherwise
      */
     public function fileExists(string $path): bool
@@ -35,8 +34,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Check if a directory exists at the given path
      *
-     * @param string $path Directory path
-     *
+     * @param  string  $path  Directory path
      * @return bool True if directory exists, false otherwise
      */
     public function directoryExists(string $path): bool
@@ -47,8 +45,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Check if a file or directory exists at the given path
      *
-     * @param string $path Path to check
-     *
+     * @param  string  $path  Path to check
      * @return bool True if exists, false otherwise
      */
     private function exists(string $path): bool
@@ -62,7 +59,7 @@ final readonly class OciAdapter implements FilesystemAdapter
                 200 => true,
                 404 => false,
                 default => throw new UnableToReadFile(
-                    'Invalid response code: ' . $response->getStatusCode(),
+                    'Invalid response code: '.$response->getStatusCode(),
                     $response->getStatusCode()
                 ),
             };
@@ -70,7 +67,7 @@ final readonly class OciAdapter implements FilesystemAdapter
             if ($exception->getCode() === 404) {
                 return false;
             }
-            
+
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
         }
     }
@@ -78,9 +75,9 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Write a file using a stream
      *
-     * @param string $path Path to write to
-     * @param resource $contents Contents to write
-     * @param Config $config Configuration options
+     * @param  string  $path  Path to write to
+     * @param  resource  $contents  Contents to write
+     * @param  Config  $config  Configuration options
      *
      * @throws UnableToWriteFile
      */
@@ -111,8 +108,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Read a file's contents
      *
-     * @param string $path Path to read from
-     *
+     * @param  string  $path  Path to read from
      * @return string File contents
      *
      * @throws UnableToReadFile
@@ -126,8 +122,8 @@ final readonly class OciAdapter implements FilesystemAdapter
 
             if ($response->getStatusCode() === 200) {
                 return $response->getBody()->getContents();
-            } 
-            
+            }
+
             throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
         } catch (GuzzleException $exception) {
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
@@ -137,8 +133,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Read a file as a stream
      *
-     * @param string $path Path to read from
-     *
+     * @param  string  $path  Path to read from
      * @return resource File stream
      *
      * @throws UnableToReadFile
@@ -146,14 +141,14 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function readStream(string $path)
     {
         $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
-        
+
         try {
             $response = $this->client->send($uri, 'GET');
-            
+
             if ($response->getStatusCode() === 200) {
                 return $response->getBody()->detach();
             }
-            
+
             throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
         } catch (GuzzleException $exception) {
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
@@ -163,16 +158,16 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Delete a directory and all of its contents
      *
-     * @param string $path Directory path
+     * @param  string  $path  Directory path
      */
     public function deleteDirectory(string $path): void
     {
         // Ensure path has trailing slash to represent a directory
-        $dirPath = rtrim($path, '/') . '/';
-        
+        $dirPath = rtrim($path, '/').'/';
+
         // List all files in this directory
         $contents = $this->listContents($dirPath, true);
-        
+
         // Delete all files in the directory
         foreach ($contents as $item) {
             try {
@@ -186,7 +181,7 @@ final readonly class OciAdapter implements FilesystemAdapter
                 ]);
             }
         }
-        
+
         // Finally try to delete the directory placeholder itself (if it exists)
         try {
             $this->delete($dirPath);
@@ -198,7 +193,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Delete a file
      *
-     * @param string $path File path
+     * @param  string  $path  File path
      *
      * @throws UnableToReadFile
      */
@@ -220,8 +215,8 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Create a directory
      *
-     * @param string $path Directory path
-     * @param Config $config Configuration options
+     * @param  string  $path  Directory path
+     * @param  Config  $config  Configuration options
      */
     public function createDirectory(string $path, Config $config): void
     {
@@ -231,9 +226,9 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Write a file
      *
-     * @param string $path Path to write to
-     * @param string $contents Contents to write
-     * @param Config $config Configuration options
+     * @param  string  $path  Path to write to
+     * @param  string  $contents  Contents to write
+     * @param  Config  $config  Configuration options
      *
      * @throws UnableToWriteFile
      */
@@ -261,8 +256,8 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Set visibility of a file (Not supported by OCI)
      *
-     * @param string $path File path
-     * @param string $visibility Visibility level
+     * @param  string  $path  File path
+     * @param  string  $visibility  Visibility level
      *
      * @throws \RuntimeException
      */
@@ -274,7 +269,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Get visibility of a file (Not supported by OCI)
      *
-     * @param string $path File path
+     * @param  string  $path  File path
      *
      * @throws \RuntimeException
      */
@@ -286,8 +281,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Get the mime type of a file
      *
-     * @param string $path File path
-     *
+     * @param  string  $path  File path
      * @return FileAttributes File attributes with mime type
      *
      * @throws UnableToReadFile
@@ -305,7 +299,7 @@ final readonly class OciAdapter implements FilesystemAdapter
                     mimeType: $response->getHeader('Content-Type')[0]
                 );
             }
-            
+
             throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
         } catch (GuzzleException $exception) {
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
@@ -315,8 +309,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Get the last modified time of a file
      *
-     * @param string $path File path
-     *
+     * @param  string  $path  File path
      * @return FileAttributes File attributes with last modified time
      *
      * @throws UnableToReadFile
@@ -334,7 +327,7 @@ final readonly class OciAdapter implements FilesystemAdapter
                     lastModified: Carbon::parse($response->getHeader('last-modified')[0])->timestamp
                 );
             }
-            
+
             throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
         } catch (GuzzleException $exception) {
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
@@ -344,8 +337,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Get the size of a file
      *
-     * @param string $path File path
-     *
+     * @param  string  $path  File path
      * @return FileAttributes File attributes with size
      *
      * @throws UnableToReadFile
@@ -360,10 +352,10 @@ final readonly class OciAdapter implements FilesystemAdapter
             if ($response->getStatusCode() === 200) {
                 return new FileAttributes(
                     path: $path,
-                    fileSize: (int)$response->getHeader('Content-Length')[0]
+                    fileSize: (int) $response->getHeader('Content-Length')[0]
                 );
             }
-            
+
             throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
         } catch (GuzzleException $exception) {
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
@@ -373,9 +365,8 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * List contents of a directory
      *
-     * @param string $path Directory path
-     * @param bool $deep Whether to recurse into subdirectories
-     *
+     * @param  string  $path  Directory path
+     * @param  bool  $deep  Whether to recurse into subdirectories
      * @return iterable<FileAttributes> List of file attributes
      *
      * @throws UnableToReadFile
@@ -384,23 +375,23 @@ final readonly class OciAdapter implements FilesystemAdapter
     {
         $files = collect([]);
         $prefix = rtrim($path, '/');
-        
+
         // Prepare query parameters to filter by prefix if path is provided
         $queryParams = [];
-        if (!empty($prefix)) {
+        if (! empty($prefix)) {
             $queryParams['prefix'] = $prefix;
-            
+
             // Add delimiter if not recursively listing
-            if (!$deep) {
+            if (! $deep) {
                 $queryParams['delimiter'] = '/';
             }
         }
-        
+
         $uri = sprintf('%s/o', $this->client->getBucketUri());
-        
+
         // Add query parameters to URI if they exist
-        if (!empty($queryParams)) {
-            $uri .= '?' . http_build_query($queryParams);
+        if (! empty($queryParams)) {
+            $uri .= '?'.http_build_query($queryParams);
         }
 
         try {
@@ -411,24 +402,24 @@ final readonly class OciAdapter implements FilesystemAdapter
 
                 foreach ($data->objects as $object) {
                     // Skip the directory placeholder itself when listing
-                    if ($object->name === $prefix . '/' && !empty($prefix)) {
+                    if ($object->name === $prefix.'/' && ! empty($prefix)) {
                         continue;
                     }
-                    
+
                     // For non-recursive listing, only include files directly in this directory
-                    if (!$deep && strpos(substr($object->name, strlen($prefix . '/')), '/') !== false) {
+                    if (! $deep && strpos(substr($object->name, strlen($prefix.'/')), '/') !== false) {
                         continue;
                     }
-                    
+
                     $fileSize = $object->size ?? null;
-                    $lastModified = isset($object->timeModified) 
-                        ? strtotime($object->timeModified) 
+                    $lastModified = isset($object->timeModified)
+                        ? strtotime($object->timeModified)
                         : null;
-                        
+
                     $files->push(
                         new FileAttributes(
                             $object->name,
-                            (int)$fileSize,
+                            (int) $fileSize,
                             null,
                             $lastModified
                         )
@@ -437,7 +428,7 @@ final readonly class OciAdapter implements FilesystemAdapter
 
                 return $files;
             }
-            
+
             throw new UnableToReadFile('Unable to list contents', $response->getStatusCode());
         } catch (GuzzleException $exception) {
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
@@ -447,9 +438,9 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Move a file
      *
-     * @param string $source Source path
-     * @param string $destination Destination path
-     * @param Config $config Configuration options
+     * @param  string  $source  Source path
+     * @param  string  $destination  Destination path
+     * @param  Config  $config  Configuration options
      *
      * @throws UnableToReadFile
      */
@@ -464,9 +455,9 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Copy a file
      *
-     * @param string $source Source path
-     * @param string $destination Destination path
-     * @param Config $config Configuration options
+     * @param  string  $source  Source path
+     * @param  string  $destination  Destination path
+     * @param  Config  $config  Configuration options
      *
      * @throws UnableToReadFile
      */
@@ -484,7 +475,7 @@ final readonly class OciAdapter implements FilesystemAdapter
 
         try {
             $response = $this->client->send($uri, 'POST', [], $body);
-            
+
             if ($response->getStatusCode() !== 200) {
                 throw new UnableToReadFile('Unable to copy file', $response->getStatusCode());
             }
@@ -496,8 +487,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     /**
      * Get a public URL for a file
      *
-     * @param string $path File path
-     *
+     * @param  string  $path  File path
      * @return string Public URL
      */
     public function getUrl($path): string

@@ -10,13 +10,13 @@ use LaravelOCI\LaravelOciDriver\OciClient;
 function createTestOciClient(array $overrides = []): OciClient
 {
     // Use environment variables for real testing or default test values
-    $config = array_merge(config('filesystems.disks.oci',[]), $overrides);
+    $config = array_merge(config('filesystems.disks.oci', []), $overrides);
 
-        // For CI testing or local testing without credentials
-        // Create a temporary key file for testing if it doesn't exist
-        if (!file_exists($config['key_path'])) {
-            // Create a proper private key for testing
-            $privateKey = <<<EOD
+    // For CI testing or local testing without credentials
+    // Create a temporary key file for testing if it doesn't exist
+    if (! file_exists($config['key_path'])) {
+        // Create a proper private key for testing
+        $privateKey = <<<'EOD'
 -----BEGIN PRIVATE KEY-----
 MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC7VJTUt9Us8cKj
 MzEfYyjiWA4R4/M2bS1GB4t7NXp98C3SC6dVMvDuictGeurT8jNbvJZHtCSuYEvu
@@ -47,12 +47,11 @@ BAL2K+I2IR+t0YZ5qCVW3o33OA==
 -----END PRIVATE KEY-----
 EOD;
 
-            // Create a temporary private key file
-            $tempKeyPath = sys_get_temp_dir() . '/oci_test_key.pem';
-            file_put_contents($tempKeyPath, $privateKey);
-            $config['key_path'] = $tempKeyPath;
-        }
-    
+        // Create a temporary private key file
+        $tempKeyPath = sys_get_temp_dir().'/oci_test_key.pem';
+        file_put_contents($tempKeyPath, $privateKey);
+        $config['key_path'] = $tempKeyPath;
+    }
 
     return OciClient::createWithConfiguration($config);
 }
@@ -61,7 +60,7 @@ EOD;
  * Clean up test artifacts
  */
 afterEach(function () {
-    if (file_exists(__DIR__.'/test-key.pem') && !($_ENV['OCI_RUN_REAL_TESTS'] ?? false)) {
+    if (file_exists(__DIR__.'/test-key.pem') && ! ($_ENV['OCI_RUN_REAL_TESTS'] ?? false)) {
         unlink(__DIR__.'/test-key.pem');
     }
 });
@@ -77,7 +76,7 @@ it('throws exception with invalid configuration', function () {
         'namespace' => config('filesystems.disks.oci.namespace'),
         'region' => config('filesystems.disks.oci.region'),
     ];
-    
+
     OciClient::createWithConfiguration($invalidConfig);
 })->throws(\InvalidArgumentException::class);
 
@@ -85,11 +84,11 @@ it('builds correct bucket URI', function () {
     $client = createTestOciClient([
         'namespace' => config('filesystems.disks.oci.namespace'),
         'region' => config('filesystems.disks.oci.region'),
-        'bucket' => config('filesystems.disks.oci.bucket')
+        'bucket' => config('filesystems.disks.oci.bucket'),
     ]);
-    
+
     $uri = $client->getBucketUri();
-    
+
     // Expected format: https://objectstorage.{region}.oraclecloud.com/n/{namespace}/b/{bucket}
     expect($uri)->toBe('https://objectstorage.test-region.oraclecloud.com/n/test-namespace/b/test-bucket');
 });
@@ -98,41 +97,41 @@ it('gets storage tier as enum', function () {
     // Test standard tier
     $client = createTestOciClient(['storage_tier' => 'Standard']);
     expect($client->getStorageTier())->toBe(StorageTier::STANDARD);
-    
+
     // Test archive tier
     $client = createTestOciClient(['storage_tier' => 'Archive']);
     expect($client->getStorageTier())->toBe(StorageTier::ARCHIVE);
-    
+
     // Test infrequent access tier
     $client = createTestOciClient(['storage_tier' => 'InfrequentAccess']);
     expect($client->getStorageTier())->toBe(StorageTier::INFREQUENT_ACCESS);
-    
+
     // Test default when invalid
     $client = createTestOciClient(['storage_tier' => 'InvalidTier']);
     expect($client->getStorageTier())->toBe(StorageTier::STANDARD);
 });
 
 it('creates temporary URLs for objects', function () {
-    
+
     $client = createTestOciClient();
-    $testFile = 'temp-url-test-' . time() . '.txt';
+    $testFile = 'temp-url-test-'.time().'.txt';
     $adapter = new \LaravelOCI\LaravelOciDriver\OciAdapter($client);
-    
+
     // Create a file to generate a URL for
-    $adapter->write($testFile, 'test content', new \League\Flysystem\Config());
-    
+    $adapter->write($testFile, 'test content', new \League\Flysystem\Config);
+
     try {
         // Generate temporary URL
         $expiresAt = Carbon::now()->addMinutes(5);
         $url = $client->createTemporaryUrl($testFile, $expiresAt);
-        
+
         // Basic validation of the URL format
         expect($url)->toBeString();
         expect($url)->toContain('http');
         expect($url)->toContain($client->getBucket());
-        
+
         // Make a HTTP request to the URL to confirm it works
-        $response = (new \GuzzleHttp\Client())->get($url);
+        $response = (new \GuzzleHttp\Client)->get($url);
         expect($response->getStatusCode())->toBe(200);
         expect($response->getBody()->getContents())->toBe('test content');
     } finally {
@@ -143,12 +142,12 @@ it('creates temporary URLs for objects', function () {
 
 it('handles authorization headers', function () {
     $client = createTestOciClient();
-    
-    $uri = 'https://objectstorage.' . config('filesystems.disks.oci.region') . '.oraclecloud.com/n/' . config('filesystems.disks.oci.namespace') . '/b/' . config('filesystems.disks.oci.bucket') . '/o/test-file';
+
+    $uri = 'https://objectstorage.'.config('filesystems.disks.oci.region').'.oraclecloud.com/n/'.config('filesystems.disks.oci.namespace').'/b/'.config('filesystems.disks.oci.bucket').'/o/test-file';
     $method = 'GET';
-    
+
     $headers = $client->getAuthorizationHeaders($uri, $method);
-    
+
     // Headers should contain required OCI authentication headers
     expect($headers)->toBeArray();
     expect(array_keys($headers))->toContain('Date');
