@@ -1,0 +1,19 @@
+never use Mockery or any other mock framework for testing
+avoid using dummy data in tests
+use PHP v8.2 features 
+enahnce code make it clean and readable 
+use the latest features of laravel
+use the latest features of spatie/laravel-package-tools
+
+add tests for all the code
+add phpstan for static analysis
+add pestphp for testing
+
+add github actions for testing and static analysis
+add github actions for release
+add github actions for deployment
+
+add gitignore for gitignore
+add composer.json for composer.json
+
+publish to packagist

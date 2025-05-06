@@ -1,37 +1,37 @@
 <?php
 
-namespace VendorName\Skeleton\Tests;
+namespace LaravelOCI\LaravelOciDriver\Tests;
 
-use Illuminate\Database\Eloquent\Factories\Factory;
 use Orchestra\Testbench\TestCase as Orchestra;
-use VendorName\Skeleton\SkeletonServiceProvider;
+use LaravelOCI\LaravelOciDriver\LaravelOciDriverServiceProvider;
 
 class TestCase extends Orchestra
 {
     protected function setUp(): void
     {
         parent::setUp();
-
-        Factory::guessFactoryNamesUsing(
-            fn (string $modelName) => 'VendorName\\Skeleton\\Database\\Factories\\'.class_basename($modelName).'Factory'
-        );
     }
 
     protected function getPackageProviders($app)
     {
         return [
-            SkeletonServiceProvider::class,
+            LaravelOciDriverServiceProvider::class,
         ];
     }
 
     public function getEnvironmentSetUp($app)
     {
         config()->set('database.default', 'testing');
-
-        /*
-         foreach (\Illuminate\Support\Facades\File::allFiles(__DIR__ . '/database/migrations') as $migration) {
-            (include $migration->getRealPath())->up();
-         }
-         */
+        config()->set('filesystems.disks.oci', [
+            'driver' => 'oci',
+            'namespace' => 'test-namespace',
+            'region' => 'test-region',
+            'bucket' => 'test-bucket',
+            'tenancy_id' => 'test-tenancy-id',
+            'user_id' => 'test-user-id',
+            'storage_tier' => 'Standard',
+            'key_fingerprint' => 'test-key-fingerprint',
+            'key_path' => __DIR__.'/test-key.pem',
+        ]);
     }
 }

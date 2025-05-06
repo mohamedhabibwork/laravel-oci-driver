@@ -1,68 +1,95 @@
-# :package_description
+# Laravel OCI Driver
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/:vendor_slug/:package_slug.svg?style=flat-square)](https://packagist.org/packages/:vendor_slug/:package_slug)
-[![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/:vendor_slug/:package_slug/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/:vendor_slug/:package_slug/actions?query=workflow%3Arun-tests+branch%3Amain)
-[![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/:vendor_slug/:package_slug/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/:vendor_slug/:package_slug/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
-[![Total Downloads](https://img.shields.io/packagist/dt/:vendor_slug/:package_slug.svg?style=flat-square)](https://packagist.org/packages/:vendor_slug/:package_slug)
-<!--delete-->
----
-This repo can be used to scaffold a Laravel package. Follow these steps to get started:
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/mohamedhabibwork/laravel-oci-driver.svg?style=flat-square)](https://packagist.org/packages/mohamedhabibwork/laravel-oci-driver)
+[![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/mohamedhabibwork/laravel-oci-driver/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/mohamedhabibwork/laravel-oci-driver/actions?query=workflow%3Arun-tests+branch%3Amain)
+[![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/mohamedhabibwork/laravel-oci-driver/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/mohamedhabibwork/laravel-oci-driver/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
+[![Total Downloads](https://img.shields.io/packagist/dt/mohamedhabibwork/laravel-oci-driver.svg?style=flat-square)](https://packagist.org/packages/mohamedhabibwork/laravel-oci-driver)
 
-1. Press the "Use this template" button at the top of this repo to create a new repo with the contents of this skeleton.
-2. Run "php ./configure.php" to run a script that will replace all placeholders throughout all the files.
-3. Have fun creating your package.
-4. If you need help creating a package, consider picking up our <a href="https://laravelpackage.training">Laravel Package Training</a> video course.
----
-<!--/delete-->
-This is where your description should go. Limit it to a paragraph or two. Consider adding a small example.
+A Laravel filesystem driver for Oracle Cloud Infrastructure (OCI) Object Storage. This package integrates seamlessly with Laravel's storage system, allowing you to use OCI Object Storage just like any other Laravel storage driver.
 
-## Support us
+## Features
 
-[<img src="https://github-ads.s3.eu-central-1.amazonaws.com/:package_name.jpg?t=1" width="419px" />](https://spatie.be/github-ad-click/:package_name)
-
-We invest a lot of resources into creating [best in class open source packages](https://spatie.be/open-source). You can support us by [buying one of our paid products](https://spatie.be/open-source/support-us).
-
-We highly appreciate you sending us a postcard from your hometown, mentioning which of our package(s) you are using. You'll find our address on [our contact page](https://spatie.be/about-us). We publish all received postcards on [our virtual postcard wall](https://spatie.be/open-source/postcards).
+- Full integration with Laravel's filesystem abstraction
+- Support for all standard file operations (read, write, delete, etc.)
+- Support for temporary URLs
+- Configurable storage tier
+- Proper authentication using OCI API keys
+- PHP 8.2+ and Laravel 10+ support
 
 ## Installation
 
 You can install the package via composer:
 
 ```bash
-composer require :vendor_slug/:package_slug
+composer require mohamedhabibwork/laravel-oci-driver
 ```
 
-You can publish and run the migrations with:
+## Configuration
+
+After installation, publish the configuration file:
 
 ```bash
-php artisan vendor:publish --tag=":package_slug-migrations"
-php artisan migrate
+php artisan vendor:publish --tag="laravel-oci-driver-config"
 ```
 
-You can publish the config file with:
-
-```bash
-php artisan vendor:publish --tag=":package_slug-config"
-```
-
-This is the contents of the published config file:
+Then, add the following to your `config/filesystems.php` file in the `disks` array:
 
 ```php
-return [
-];
+'oci' => [
+    'driver' => 'oci',
+    'namespace' => env('OCI_NAMESPACE'),
+    'region' => env('OCI_REGION'),
+    'bucket' => env('OCI_BUCKET'),
+    'tenancy_id' => env('OCI_TENANCY_ID'),
+    'user_id' => env('OCI_USER_ID'),
+    'storage_tier' => env('OCI_STORAGE_TIER', 'Standard'),
+    'key_fingerprint' => env('OCI_KEY_FINGERPRINT'),
+    'key_path' => env('OCI_KEY_PATH'),
+],
 ```
 
-Optionally, you can publish the views using
+Add the following environment variables to your `.env` file:
 
-```bash
-php artisan vendor:publish --tag=":package_slug-views"
+```
+OCI_NAMESPACE=your-namespace
+OCI_REGION=your-region
+OCI_BUCKET=your-bucket-name
+OCI_TENANCY_ID=your-tenancy-id
+OCI_USER_ID=your-user-id
+OCI_STORAGE_TIER=Standard
+OCI_KEY_FINGERPRINT=your-key-fingerprint
+OCI_KEY_PATH=/path/to/your/oci/private-key.pem
 ```
 
 ## Usage
 
+Once configured, you can use the OCI driver just like any other Laravel storage driver:
+
 ```php
-$variable = new VendorName\Skeleton();
-echo $variable->echoPhrase('Hello, VendorName!');
+// Store a file
+Storage::disk('oci')->put('file.txt', 'Contents');
+
+// Get a file
+$contents = Storage::disk('oci')->get('file.txt');
+
+// Check if a file exists
+$exists = Storage::disk('oci')->exists('file.txt');
+
+// Delete a file
+Storage::disk('oci')->delete('file.txt');
+
+// Generate a temporary URL (valid for 1 hour)
+$url = Storage::disk('oci')->temporaryUrl('file.txt', now()->addHour());
+```
+
+You can also use the `Storage` facade with the default disk if you've set OCI as your default in `config/filesystems.php`:
+
+```php
+// In config/filesystems.php
+'default' => env('FILESYSTEM_DISK', 'oci'),
+
+// Then in your code
+Storage::put('file.txt', 'Contents');
 ```
 
 ## Testing
@@ -85,7 +112,7 @@ Please review [our security policy](../../security/policy) on how to report secu
 
 ## Credits
 
-- [:author_name](https://github.com/:author_username)
+- [Mohamed Habib](https://github.com/mohamedhabibwork)
 - [All Contributors](../../contributors)
 
 ## License

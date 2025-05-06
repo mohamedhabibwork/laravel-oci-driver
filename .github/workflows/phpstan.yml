@@ -2,6 +2,12 @@ name: PHPStan
 
 on:
   push:
+    branches: [main]
+    paths:
+      - '**.php'
+      - 'phpstan.neon.dist'
+      - '.github/workflows/phpstan.yml'
+  pull_request:
     paths:
       - '**.php'
       - 'phpstan.neon.dist'
@@ -18,11 +24,21 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.2'
           coverage: none
+          extensions: mbstring, xml, pcntl
+          tools: composer:v2
 
       - name: Install composer dependencies
         uses: ramsey/composer-install@v3
 
       - name: Run PHPStan
-        run: ./vendor/bin/phpstan --error-format=github
+        run: ./vendor/bin/phpstan analyse --error-format=github
+
+      - name: Store PHPStan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phpstan-results
+          path: build/phpstan
+          retention-days: 7

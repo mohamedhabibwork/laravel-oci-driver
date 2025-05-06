@@ -2,11 +2,20 @@ includes:
     - phpstan-baseline.neon
 
 parameters:
-    level: 5
+    level: 8
     paths:
         - src
         - config
-        - database
+        - tests
+    excludePaths:
+        - tests/*/fixtures/*
     tmpDir: build/phpstan
     checkOctaneCompatibility: true
     checkModelProperties: true
+    reportUnmatchedIgnoredErrors: false
+
+    ignoreErrors:
+        - '#PHPDoc tag @throws with type .* is not subtype of Throwable#'
+        - '#Called env\(\) outside of the config directory#'  
+        - '#Parameter .* with no value type specified in iterable type array#'
+        - '#TestCase\.php#'
