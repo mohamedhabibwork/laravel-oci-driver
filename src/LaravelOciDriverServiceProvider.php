@@ -23,7 +23,7 @@ class LaravelOciDriverServiceProvider extends PackageServiceProvider
     {
         $package
             ->name('laravel-oci-driver')
-            ->hasConfigFile()
+            // ->hasConfigFile()
             ->hasCommand(LaravelOciDriverCommand::class)
             ->hasInstallCommand(function (InstallCommand $command) {
                 $command
