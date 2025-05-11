@@ -4,6 +4,7 @@ namespace LaravelOCI\LaravelOciDriver;
 
 use Carbon\Carbon;
 use GuzzleHttp\Exception\GuzzleException;
+use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use League\Flysystem\Config;
 use League\Flysystem\FileAttributes;
 use League\Flysystem\FilesystemAdapter;
@@ -163,6 +164,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * delete them in a single API call for better performance.
      *
      * @param  string  $path  Directory path
+     *
      * @throws \RuntimeException When unable to list or delete objects
      */
     public function deleteDirectory(string $path): void
@@ -173,35 +175,35 @@ final readonly class OciAdapter implements FilesystemAdapter
         // List all objects in the bucket with the directory prefix
         $uri = sprintf('%s/o', $this->client->getBucketUri());
         $queryParams = ['prefix' => $dirPath];
-        $requestUri = $uri . '?' . http_build_query($queryParams);
+        $requestUri = $uri.'?'.http_build_query($queryParams);
 
         try {
             $response = $this->client->send($requestUri, 'GET');
-            
+
             if ($response->getStatusCode() === 200) {
                 $data = json_decode($response->getBody()->getContents(), false);
-                
+
                 // Early return if no objects found
                 if (empty($data->objects)) {
                     return;
                 }
-                
+
                 // Extract all object paths for bulk deletion
                 $objectPaths = array_map(
                     fn ($object) => $object->name,
                     $data->objects
                 );
-                
+
                 // Add directory placeholder itself if it exists (will be ignored if not)
                 $objectPaths[] = $dirPath;
-                
+
                 // Use bulk delete to remove all objects in a single API call
                 $result = $this->client->bulkDelete($objectPaths);
-                
+
                 // Log any errors that occurred during bulk deletion
-                if (!empty($result['errors']) && class_exists('\Illuminate\Support\Facades\Log')) {
+                if (! empty($result['errors']) && class_exists('\Illuminate\Support\Facades\Log')) {
                     \Illuminate\Support\Facades\Log::warning(
-                        'Some files could not be deleted during directory removal', 
+                        'Some files could not be deleted during directory removal',
                         ['errors' => $result['errors'], 'directory' => $dirPath]
                     );
                 }
@@ -224,6 +226,42 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function delete(string $path): void
     {
+        // Check if the path ends with a slash or is empty, indicating a potential directory
+        $isDirectoryPath = $path === '' || str_ends_with($path, '/');
+
+        // If it appears to be a directory, check if it has contents
+        if ($isDirectoryPath) {
+            // Normalize the directory path with a trailing slash
+            $dirPath = rtrim($path, '/').'/';
+
+            // List objects with this prefix to check if directory has contents
+            $uri = sprintf('%s/o', $this->client->getBucketUri());
+            $queryParams = ['prefix' => $dirPath, 'limit' => 1]; // Just need to know if at least one object exists
+            $requestUri = $uri.'?'.http_build_query($queryParams);
+
+            try {
+                $response = $this->client->send($requestUri, 'GET');
+
+                if ($response->getStatusCode() === 200) {
+                    $data = json_decode($response->getBody()->getContents(), false);
+
+                    // If there are objects with this prefix, use the directory deletion method
+                    if (! empty($data->objects)) {
+                        $this->deleteDirectory($path);
+
+                        return;
+                    }
+                }
+            } catch (GuzzleException $exception) {
+                if ($exception->getCode() === 404) {
+                    return; // Directory doesn't exist, that's fine
+                }
+
+                throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+            }
+        }
+
+        // Otherwise, proceed with single file deletion
         $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
 
         try {
@@ -234,11 +272,10 @@ final readonly class OciAdapter implements FilesystemAdapter
             }
         } catch (GuzzleException $exception) {
             // If the file doesn't exist (404), that's fine for our purposes
-            // Especially for directories which might not have a real object
             if ($exception->getCode() === 404) {
                 return;
             }
-            
+
             throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
         }
     }
@@ -258,6 +295,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * Write a file with enhanced metadata and storage options
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/PutObject
+     *
      * @param  string  $path  Path to write to
      * @param  string  $contents  Contents to write
      * @param  Config  $config  Configuration options
@@ -271,25 +309,25 @@ final readonly class OciAdapter implements FilesystemAdapter
         try {
             // Determine content type
             $contentType = $config->get('content_type', $this->detectContentType($contents, $path));
-            
+
             // Get storage tier - either from config or default from client
             $storageTier = $config->get('storage_tier', $this->client->getStorageTier()->value());
-            
+
             // Extract custom metadata if provided
             $headers = ['storage-tier' => $storageTier];
-            
+
             // Add any custom metadata headers
             $metadata = $config->get('metadata', []);
             foreach ($metadata as $key => $value) {
                 // OCI uses x-amz-meta- prefix for custom metadata
                 $headers["x-amz-meta-{$key}"] = $value;
             }
-            
+
             // Content-MD5 for data integrity validation
             if ($config->get('checksum', true)) {
                 $headers['Content-MD5'] = base64_encode(md5($contents, true));
             }
-            
+
             $response = $this->client->send(
                 $uri,
                 'PUT',
@@ -299,25 +337,25 @@ final readonly class OciAdapter implements FilesystemAdapter
             );
 
             if ($response->getStatusCode() !== 200) {
-                throw new \League\Flysystem\UnableToWriteFile(
-                    "Unable to write file to {$path}: HTTP {$response->getStatusCode()}",
-                    error: null
+                throw \League\Flysystem\UnableToWriteFile::atLocation(
+                    $path,
+                    "HTTP {$response->getStatusCode()}"
                 );
             }
         } catch (GuzzleException $exception) {
-            throw new \League\Flysystem\UnableToWriteFile(
-                "Failed to write file to {$path}: {$exception->getMessage()}",
-                $exception->getCode(),
+            throw \League\Flysystem\UnableToWriteFile::atLocation(
+                $path,
+                $exception->getMessage(),
                 $exception
             );
         }
     }
-    
+
     /**
      * Detect content type from contents and path
-     * 
-     * @param string $contents File contents
-     * @param string $path File path
+     *
+     * @param  string  $contents  File contents
+     * @param  string  $path  File path
      * @return string The detected MIME type
      */
     private function detectContentType(string $contents, string $path): string
@@ -346,39 +384,106 @@ final readonly class OciAdapter implements FilesystemAdapter
                 'csv' => 'text/csv',
                 'md' => 'text/markdown',
             ];
-            
+
             if (isset($mappings[strtolower($extension)])) {
                 return $mappings[strtolower($extension)];
             }
         }
-        
+
         // Fall back to finfo for content-based detection
-        return finfo_buffer(finfo_open(FILEINFO_MIME_TYPE), $contents) ?: 'application/octet-stream';
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        if ($finfo === false) {
+            return 'application/octet-stream';
+        }
+
+        return finfo_buffer($finfo, $contents) ?: 'application/octet-stream';
     }
 
     /**
-     * Set visibility of a file (Not supported by OCI)
+     * Set storage tier for a file using the visibility parameter
+     *
+     * This maps the Flysystem visibility concept to OCI storage tiers:
+     * - 'public': Standard tier (frequently accessed objects, good performance)
+     * - 'private': Archive tier (rarely accessed objects, lower cost)
+     * - 'infrequent': InfrequentAccess tier (balance between performance and cost)
      *
      * @param  string  $path  File path
-     * @param  string  $visibility  Visibility level
+     * @param  string  $visibility  Maps to storage tier ('public', 'private', 'infrequent')
      *
-     * @throws \RuntimeException
+     * @throws \InvalidArgumentException When invalid visibility value is provided
+     * @throws \League\Flysystem\UnableToSetVisibility When the operation fails
      */
     public function setVisibility(string $path, string $visibility): void
     {
-        throw new \RuntimeException('Adapter does not support visibility.');
+        // Map visibility to storage tier
+        $storageTier = match ($visibility) {
+            'public' => StorageTier::STANDARD,
+            'private' => StorageTier::ARCHIVE,
+            'infrequent' => StorageTier::INFREQUENT_ACCESS,
+            default => throw new \InvalidArgumentException("Invalid visibility value: {$visibility}. Use 'public', 'private', or 'infrequent'."),
+        };
+
+        try {
+            $success = $this->client->updateObjectStorageTier($path, $storageTier);
+
+            if (! $success) {
+                throw \League\Flysystem\UnableToSetVisibility::atLocation(
+                    $path,
+                    "Failed to set storage tier"
+                );
+            }
+        } catch (\Exception $exception) {
+            throw \League\Flysystem\UnableToSetVisibility::atLocation(
+                $path,
+                "Error: {$exception->getMessage()}",
+                $exception
+            );
+        }
     }
 
     /**
-     * Get visibility of a file (Not supported by OCI)
+     * Get storage tier of a file mapped to visibility concept
+     *
+     * This maps OCI storage tiers back to Flysystem visibility concept:
+     * - Standard tier -> 'public'
+     * - Archive tier -> 'private'
+     * - InfrequentAccess tier -> 'infrequent'
      *
      * @param  string  $path  File path
+     * @return FileAttributes File attributes with visibility value
      *
-     * @throws \RuntimeException
+     * @throws \League\Flysystem\UnableToRetrieveMetadata When unable to get file info
      */
     public function visibility(string $path): FileAttributes
     {
-        throw new \RuntimeException('Adapter does not support visibility.');
+        try {
+            $objectInfo = $this->client->getObjectInfo($path);
+
+            if ($objectInfo === null) {
+                throw \League\Flysystem\UnableToRetrieveMetadata::visibility(
+                    $path,
+                    "File not found"
+                );
+            }
+
+            // Extract the storage tier from object metadata
+            $storageTier = $objectInfo['storage-tier'] ?? 'Standard';
+
+            // Map storage tier to visibility
+            $visibility = match ($storageTier) {
+                'Archive' => 'private',
+                'InfrequentAccess' => 'infrequent',
+                default => 'public', // Standard
+            };
+
+            return new FileAttributes($path, null, $visibility);
+        } catch (\Exception $exception) {
+            throw \League\Flysystem\UnableToRetrieveMetadata::visibility(
+                $path,
+                "Error: {$exception->getMessage()}",
+                $exception
+            );
+        }
     }
 
     /**
@@ -469,6 +574,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * List contents of a directory
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/ListObjects
+     *
      * @param  string  $path  Directory path
      * @param  bool  $deep  Whether to recurse into subdirectories
      * @return iterable<FileAttributes> List of file attributes
@@ -478,10 +584,10 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function listContents(string $path, bool $deep): iterable
     {
         $path = rtrim($path, '/');
-        $prefix = !empty($path) ? $path.'/' : '';
+        $prefix = ! empty($path) ? $path.'/' : '';
         $delimiter = $deep ? null : '/';
-        
-        try {            
+
+        try {
             // Use the client's listObjects method for better error handling and pagination
             $result = $this->client->listObjects([
                 'prefix' => $prefix,
@@ -489,33 +595,35 @@ final readonly class OciAdapter implements FilesystemAdapter
                 // Use a reasonable limit to prevent memory issues
                 'limit' => 1000,
             ]);
-            
+
             // Convert to FileAttributes collection
             $files = collect();
-            
+
             // Process regular objects
             foreach ($result['objects'] ?? [] as $object) {
                 // Skip the directory placeholder itself when listing
-                if ($object['name'] === $prefix && !empty($prefix)) {
+                if ($object['name'] === $prefix && ! empty($prefix)) {
                     continue;
                 }
-                
+
                 // For non-recursive listing, skip nested objects
-                if (!$deep && !empty($prefix) && 
+                if (! $deep && ! empty($prefix) &&
                     str_contains(substr($object['name'], strlen($prefix)), '/')) {
                     continue;
                 }
-                
+
                 // Extract file metadata
                 $fileSize = $object['size'] ?? null;
-                $lastModified = isset($object['timeModified'])
-                    ? strtotime($object['timeModified'])
-                    : null;
+                $lastModified = null;
+                if (isset($object['timeModified'])) {
+                    $timestamp = strtotime($object['timeModified']);
+                    $lastModified = $timestamp !== false ? $timestamp : null;
+                }
                 $mimeType = $object['contentType'] ?? null;
-                
+
                 // Determine if it's a directory by checking for trailing slash
                 $isDirectory = str_ends_with($object['name'], '/');
-                
+
                 $files->push(
                     new FileAttributes(
                         path: $object['name'],
@@ -532,9 +640,9 @@ final readonly class OciAdapter implements FilesystemAdapter
                     )
                 );
             }
-            
+
             // If not recursive, also process prefixes (directories)
-            if (!$deep && isset($result['prefixes'])) {
+            if (! $deep && isset($result['prefixes'])) {
                 foreach ($result['prefixes'] as $dirPrefix) {
                     $files->push(
                         new FileAttributes(
@@ -548,13 +656,10 @@ final readonly class OciAdapter implements FilesystemAdapter
                     );
                 }
             }
-            
+
             return $files;
         } catch (\Exception $exception) {
-            throw new \League\Flysystem\UnableToListContents(
-                "Unable to list contents at path: {$path}", 
-                $exception
-            );
+            throw \League\Flysystem\UnableToListContents::atLocation($path, $deep, $exception);
         }
     }
 
@@ -562,6 +667,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * Move a file using the native OCI renameObject API
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/RenameObject
+     *
      * @param  string  $source  Source path
      * @param  string  $destination  Destination path
      * @param  Config  $config  Configuration options
@@ -573,11 +679,12 @@ final readonly class OciAdapter implements FilesystemAdapter
         try {
             // Use the more efficient native renameObject API
             $success = $this->client->renameObject($source, $destination);
-            
-            if (!$success) {
-                throw new \League\Flysystem\UnableToMoveFile(
-                    "Unable to move file from {$source} to {$destination}",
-                    error: null
+
+            if (! $success) {
+                throw \League\Flysystem\UnableToMoveFile::because(
+                    "operation failed",
+                    $source,
+                    $destination
                 );
             }
         } catch (GuzzleException $exception) {
@@ -586,9 +693,9 @@ final readonly class OciAdapter implements FilesystemAdapter
                 $this->copy($source, $destination, $config);
                 $this->delete($source);
             } catch (\Exception $e) {
-                throw new \League\Flysystem\UnableToMoveFile(
-                    "Failed to move file: {$e->getMessage()}",
-                    $e->getCode(),
+                throw \League\Flysystem\UnableToMoveFile::fromLocationTo(
+                    $source,
+                    $destination,
                     $e
                 );
             }
@@ -599,6 +706,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * Copy a file
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/CopyObject
+     *
      * @param  string  $source  Source path
      * @param  string  $destination  Destination path
      * @param  Config  $config  Configuration options
@@ -612,7 +720,7 @@ final readonly class OciAdapter implements FilesystemAdapter
         // Extract any custom storage tier or content-type from config
         $destinationStorageTier = $config->get('storage_tier', $this->client->getStorageTier()->value());
         $contentType = $config->get('content_type');
-        
+
         $body = json_encode([
             'sourceObjectName' => $source,
             'destinationRegion' => $this->client->getRegion(),
@@ -629,39 +737,42 @@ final readonly class OciAdapter implements FilesystemAdapter
             $response = $this->client->send($uri, 'POST', [], $body);
 
             if ($response->getStatusCode() !== 200) {
-                throw new \League\Flysystem\UnableToCopyFile(
-                    "Unable to copy file from {$source} to {$destination}: HTTP {$response->getStatusCode()}",
-                    error: null
+                throw \League\Flysystem\UnableToCopyFile::fromLocationTo(
+                    $source,
+                    $destination,
+                    new \RuntimeException("HTTP {$response->getStatusCode()}")
                 );
             }
         } catch (GuzzleException $exception) {
-            throw new \League\Flysystem\UnableToCopyFile(
-                "Failed to copy file: {$exception->getMessage()}",
-                $exception->getCode(),
+            throw \League\Flysystem\UnableToCopyFile::fromLocationTo(
+                $source,
+                $destination,
                 $exception
             );
         }
     }
-    
+
     /**
      * Restore objects from Archive storage tier
-     * 
+     *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/RestoreObjects
-     * @param string $path Path to restore
-     * @param int $hours Number of hours to make the restored objects available (10-240000 hours)
+     *
+     * @param  string  $path  Path to restore
+     * @param  int  $hours  Number of hours to make the restored objects available (10-240000 hours)
      * @return bool True if restore request was successful
      */
     public function restore(string $path, int $hours = 24): bool
     {
         return $this->client->restoreObjects([$path], $hours);
     }
-    
+
     /**
      * Update storage tier for an object
-     * 
+     *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/UpdateObjectStorageTier
-     * @param string $path Object path
-     * @param string|StorageTier $storageTier Storage tier to change to
+     *
+     * @param  string  $path  Object path
+     * @param  string|StorageTier  $storageTier  Storage tier to change to
      * @return bool True if successful
      */
     public function updateStorageTier(string $path, string|StorageTier $storageTier): bool
@@ -669,7 +780,7 @@ final readonly class OciAdapter implements FilesystemAdapter
         if (is_string($storageTier)) {
             $storageTier = StorageTier::fromString($storageTier);
         }
-        
+
         return $this->client->updateObjectStorageTier($path, $storageTier);
     }
 

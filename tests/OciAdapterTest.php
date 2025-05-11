@@ -2,6 +2,7 @@
 
 namespace LaravelOCI\LaravelOciDriver\Tests;
 
+use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\OciAdapter;
 use LaravelOCI\LaravelOciDriver\OciClient;
 use League\Flysystem\Config;
@@ -188,6 +189,104 @@ it('copies a file', function () {
     // Clean up
     $adapter->delete($sourcePath);
     $adapter->delete($destPath);
+});
+
+it('sets visibility to map to storage tier', function () {
+    $adapter = createTestOciAdapter();
+    $path = getTestFilePath();
+    $content = 'test visibility content';
+
+    // Create the file first
+    $adapter->write($path, $content, new Config);
+
+    // Test setting to Archive tier via 'private' visibility
+    $adapter->setVisibility($path, 'private');
+
+    // Get the file info through adapter's visibility method
+    $fileAttributes = $adapter->visibility($path);
+
+    // Check if the visibility is mapped correctly
+    expect($fileAttributes->visibility())->toBe('private');
+
+    // Test setting to Standard tier via 'public' visibility
+    $adapter->setVisibility($path, 'public');
+    $fileAttributes = $adapter->visibility($path);
+    expect($fileAttributes->visibility())->toBe('public');
+
+    // Test setting to InfrequentAccess tier via 'infrequent' visibility
+    $adapter->setVisibility($path, 'infrequent');
+    $fileAttributes = $adapter->visibility($path);
+    expect($fileAttributes->visibility())->toBe('infrequent');
+
+    // Clean up
+    $adapter->delete($path);
+});
+
+it('throws exception when setting invalid visibility value', function () {
+    $adapter = createTestOciAdapter();
+    $path = getTestFilePath();
+
+    // Create a test file
+    $adapter->write($path, 'test content', new Config);
+
+    // Attempt to set an invalid visibility
+    expect(fn () => $adapter->setVisibility($path, 'invalid_visibility'))
+        ->toThrow(\InvalidArgumentException::class);
+
+    // Clean up
+    $adapter->delete($path);
+});
+
+it('retrieves storage tier as visibility', function () {
+    $adapter = createTestOciAdapter();
+    $path = getTestFilePath();
+    $content = 'test visibility content';
+
+    // Create the file with Standard tier (default)
+    $adapter->write($path, $content, new Config);
+
+    // Check if the default visibility is 'public' (Standard)
+    $fileAttributes = $adapter->visibility($path);
+    expect($fileAttributes->visibility())->toBe('public');
+
+    // Clean up
+    $adapter->delete($path);
+});
+
+it('updates storage tier directly', function () {
+    $adapter = createTestOciAdapter();
+    $path = getTestFilePath();
+    $content = 'test storage tier content';
+
+    // Create the file
+    $adapter->write($path, $content, new Config);
+
+    // Update storage tier using the adapter's updateStorageTier method
+    $result = $adapter->updateStorageTier($path, StorageTier::ARCHIVE);
+    expect($result)->toBeTrue();
+
+    // Verify the storage tier was changed via the visibility method
+    $fileAttributes = $adapter->visibility($path);
+    expect($fileAttributes->visibility())->toBe('private'); // Archive maps to 'private'
+
+    // Clean up
+    $adapter->delete($path);
+});
+
+it('writes file with specific storage tier', function () {
+    $adapter = createTestOciAdapter();
+    $path = getTestFilePath();
+    $content = 'test storage tier content';
+
+    // Create the file with InfrequentAccess tier
+    $adapter->write($path, $content, new Config(['storage_tier' => StorageTier::INFREQUENT_ACCESS->value()]));
+
+    // Verify the storage tier was set correctly
+    $fileAttributes = $adapter->visibility($path);
+    expect($fileAttributes->visibility())->toBe('infrequent');
+
+    // Clean up
+    $adapter->delete($path);
 });
 
 it('deletes a directory with contents', function () {
