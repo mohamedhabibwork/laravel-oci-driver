@@ -24,34 +24,35 @@ class LaravelOciDriverServiceProvider extends PackageServiceProvider
         $package
             ->name('laravel-oci-driver')
             // ->hasConfigFile()
-            ->hasCommand(LaravelOciDriverCommand::class)
-            ->hasInstallCommand(function (InstallCommand $command) {
-                $command
-                    ->publishConfigFile()
-                    ->askToRunMigrations()
-                    ->askToStarRepoOnGitHub('mohamedhabibwork/laravel-oci-driver')
-                    ->endWith(function (InstallCommand $command) {
-                        $command->line('');
-                        $command->info('Thank you for installing Laravel OCI Driver!');
-                        $command->line('');
-                        $command->line('You can now use the "oci" driver in your filesystem configuration:');
-                        $command->line('');
-                        $command->line('\'disks\' => [');
-                        $command->line('    \'oci\' => [');
-                        $command->line('        \'driver\' => \'oci\',');
-                        $command->line('        \'namespace\' => env(\'OCI_NAMESPACE\'),');
-                        $command->line('        \'region\' => env(\'OCI_REGION\'),');
-                        $command->line('        \'bucket\' => env(\'OCI_BUCKET\'),');
-                        $command->line('        \'tenancy_id\' => env(\'OCI_TENANCY_ID\'),');
-                        $command->line('        \'user_id\' => env(\'OCI_USER_ID\'),');
-                        $command->line('        \'storage_tier\' => env(\'OCI_STORAGE_TIER\', \'Standard\'),');
-                        $command->line('        \'key_fingerprint\' => env(\'OCI_KEY_FINGERPRINT\'),');
-                        $command->line('        \'key_path\' => env(\'OCI_KEY_PATH\'),');
-                        $command->line('    ],');
-                        $command->line('],');
-                        $command->line('');
-                    });
-            });
+            // ->hasCommand(LaravelOciDriverCommand::class)
+            // ->hasInstallCommand(function (InstallCommand $command) {
+            //     $command
+            //         ->publishConfigFile()
+            //         ->askToRunMigrations()
+            //         ->askToStarRepoOnGitHub('mohamedhabibwork/laravel-oci-driver')
+            //         ->endWith(function (InstallCommand $command) {
+            //             $command->line('');
+            //             $command->info('Thank you for installing Laravel OCI Driver!');
+            //             $command->line('');
+            //             $command->line('You can now use the "oci" driver in your filesystem configuration:');
+            //             $command->line('');
+            //             $command->line('\'disks\' => [');
+            //             $command->line('    \'oci\' => [');
+            //             $command->line('        \'driver\' => \'oci\',');
+            //             $command->line('        \'namespace\' => env(\'OCI_NAMESPACE\'),');
+            //             $command->line('        \'region\' => env(\'OCI_REGION\'),');
+            //             $command->line('        \'bucket\' => env(\'OCI_BUCKET\'),');
+            //             $command->line('        \'tenancy_id\' => env(\'OCI_TENANCY_ID\'),');
+            //             $command->line('        \'user_id\' => env(\'OCI_USER_ID\'),');
+            //             $command->line('        \'storage_tier\' => env(\'OCI_STORAGE_TIER\', \'Standard\'),');
+            //             $command->line('        \'key_fingerprint\' => env(\'OCI_KEY_FINGERPRINT\'),');
+            //             $command->line('        \'key_path\' => env(\'OCI_KEY_PATH\'),');
+            //             $command->line('    ],');
+            //             $command->line('],');
+            //             $command->line('');
+            //         });
+            // })
+            ;
 
         // Register the OCI storage driver
         $this->registerOciDriver();
