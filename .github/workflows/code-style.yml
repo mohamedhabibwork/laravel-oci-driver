@@ -1,0 +1,108 @@
+name: Code Style
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "**.php"
+      - ".github/workflows/code-style.yml"
+  pull_request:
+    paths:
+      - "**.php"
+      - ".github/workflows/code-style.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  check-code-style:
+    name: Check Code Style
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.head_ref }}
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+          extensions: mbstring, xml, pcntl
+          tools: composer:v2
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-pint-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-pint-
+            ${{ runner.os }}-composer-
+
+      - name: Install composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress --optimize-autoloader
+
+      - name: Check for code style issues
+        id: pint-check
+        run: |
+          echo "Running Pint dry-run to check for issues..."
+          if ./vendor/bin/pint --test; then
+            echo "issues_found=false" >> $GITHUB_OUTPUT
+            echo "✅ No code style issues found"
+          else
+            echo "issues_found=true" >> $GITHUB_OUTPUT
+            echo "❌ Code style issues found"
+          fi
+
+      - name: Fix PHP code style issues
+        if: steps.pint-check.outputs.issues_found == 'true'
+        run: |
+          echo "Fixing code style issues..."
+          ./vendor/bin/pint
+          echo "Code style issues have been fixed"
+
+      - name: Check for changes
+        if: steps.pint-check.outputs.issues_found == 'true'
+        id: verify-changed-files
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Files were changed by Pint"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No files were changed"
+          fi
+
+      - name: Commit changes
+        if: steps.verify-changed-files.outputs.changed == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: fix PHP code style issues"
+          commit_options: "--no-verify --signoff"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "github-actions[bot]@users.noreply.github.com"
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.pint-check.outputs.issues_found }}" == "true" ]; then
+            if [ "${{ steps.verify-changed-files.outputs.changed }}" == "true" ]; then
+              echo "✅ Code style issues were found and automatically fixed"
+            else
+              echo "⚠️  Code style issues were detected but no changes were made"
+            fi
+          else
+            echo "✅ No code style issues found - code looks great!"
+          fi

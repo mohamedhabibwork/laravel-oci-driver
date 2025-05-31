@@ -21,8 +21,14 @@
         </testsuite>
     </testsuites>
     <logging>
-        <junit outputFile="build/report.junit.xml"/>
+        <junit outputFile="build/logs/junit.xml"/>
     </logging>
+    <coverage>
+        <report>
+            <clover outputFile="build/logs/clover.xml"/>
+            <html outputDirectory="build/coverage"/>
+        </report>
+    </coverage>
     <source>
         <include>
             <directory suffix=".php">./src</directory>
