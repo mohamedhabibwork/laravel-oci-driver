@@ -51,10 +51,10 @@ final class Signer
      */
     public function __construct(?string $ociTenancyId = null, ?string $ociUserId = null, ?string $keyFingerPrint = null, ?string $privateKeyLocation = null)
     {
-        $this->ociTenancyId = $ociTenancyId ?? getenv(self::OCI_TENANCY_ID) ?: '';
-        $this->ociUserId = $ociUserId ?? getenv(self::OCI_USER_ID) ?: '';
-        $this->ociKeyFingerPrint = $keyFingerPrint ?? getenv(self::OCI_KEY_FINGERPRINT) ?: '';
-        $this->ociPrivateKeyLocation = $privateKeyLocation ?? getenv(self::OCI_PRIVATE_KEY_FILENAME) ?: '';
+        $this->ociTenancyId = $ociTenancyId ?? config(self::OCI_TENANCY_ID) ?? '';
+        $this->ociUserId = $ociUserId ?? config(self::OCI_USER_ID) ?? '';
+        $this->ociKeyFingerPrint = $keyFingerPrint ?? config(self::OCI_KEY_FINGERPRINT) ?? '';
+        $this->ociPrivateKeyLocation = $privateKeyLocation ?? config(self::OCI_PRIVATE_KEY_FILENAME) ?? '';
     }
 
     /**

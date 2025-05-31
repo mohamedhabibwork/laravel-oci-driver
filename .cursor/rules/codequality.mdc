@@ -1,0 +1,54 @@
+---
+description: Professional PHP 8.2+ and Laravel Code Quality Guidelines
+globs: *.php
+alwaysApply: true
+---
+
+# PHP 8.2+ and Laravel Code Quality Guidelines
+
+## Code Structure and Organization
+- Use PHP 8.2+ features including readonly properties, enums, and union types
+- Follow PSR-12 coding standards
+- Implement SOLID design principles
+- Use Laravel's latest features and best practices
+
+## Testing Standards
+- Write comprehensive tests using Pest PHP
+- Avoid mocking when possible; use real implementations
+- Test edge cases and failure scenarios
+- Maintain high test coverage
+
+## Static Analysis
+- Use PHPStan level 8 for static analysis
+- Address all type inconsistencies
+- Document parameter and return types accurately
+
+## Performance Considerations
+- Use lazy collections for large datasets
+- Implement proper database indexing
+- Optimize N+1 query problems
+- Utilize Laravel's caching mechanisms
+
+## Security Best Practices
+- Validate all user input
+- Use Laravel's security features (CSRF, XSS protection)
+- Follow OWASP security guidelines
+- Implement proper authentication and authorization
+
+## Documentation
+- Document all public APIs and methods
+- Use PHPDoc with full type information
+- Provide clear, concise explanations of complex logic
+- Document configuration options and environment variables
+
+## Dependency Management
+- Keep dependencies updated
+- Use Composer for dependency management
+- Prefer stable packages with active maintenance
+- Minimize external dependencies when possible
+
+## Version Control
+- Write meaningful commit messages
+- Follow semantic versioning
+- Create proper release notes
+- Use GitHub Actions for CI/CD

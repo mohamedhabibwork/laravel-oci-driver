@@ -4,7 +4,12 @@ namespace LaravelOCI\LaravelOciDriver\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\Console\Attribute\AsCommand;
 
+#[AsCommand(
+    name: 'oci:status',
+    description: 'Check Oracle Cloud Infrastructure storage connection status'
+)]
 class LaravelOciDriverCommand extends Command
 {
     public $signature = 'oci:status {--bucket= : Show information for a specific bucket}';

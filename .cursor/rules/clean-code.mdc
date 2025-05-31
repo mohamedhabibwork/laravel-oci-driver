@@ -1,0 +1,72 @@
+---
+description: Guidelines for writing clean, maintainable, and professional PHP code
+globs: *.php
+alwaysApply: true
+---
+# Clean Code Guidelines for PHP 8.2+ with Laravel
+
+## Constants Over Magic Numbers
+- Replace hard-coded values with PHP enums or named constants
+- Use descriptive constant names that explain the value's purpose
+- Leverage Laravel's config system for application-wide constants
+- Consider readonly class properties for complex constant structures
+
+## Meaningful Names
+- Use type declarations with descriptive variable and parameter names
+- Follow Laravel naming conventions for controllers, models, and services
+- Prefer explicit names over abbreviated ones (e.g., `$userRepository` not `$userRepo`)
+- Use noun phrases for classes and verb phrases for methods
+
+## Smart Documentation
+- Use PHP 8 attributes instead of PHPDoc when possible
+- Document complex logic with clear explanations of business rules
+- Use Laravel's built-in method documentation patterns
+- Document return types, parameters, and exceptions thoroughly
+
+## Single Responsibility
+- Follow SOLID principles, especially Single Responsibility
+- Use Laravel's service providers for proper dependency injection
+- Keep controllers thin by moving business logic to dedicated services
+- Create small, focused Eloquent models with relationships
+
+## DRY (Don't Repeat Yourself)
+- Use Laravel traits for shared model functionality
+- Leverage middleware for common request processing
+- Create reusable Blade components for UI patterns
+- Use invokable classes for single-action controllers
+
+## Clean Structure
+- Follow Laravel's directory structure conventions
+- Group related features using Laravel modules or domains
+- Use consistent file naming (PascalCase for classes, kebab-case for views)
+- Organize routes by feature or domain in separate files
+
+## Encapsulation
+- Use PHP 8's constructor property promotion
+- Leverage readonly properties for immutable data
+- Use value objects for complex data structures
+- Implement Laravel's interface contracts for better abstraction
+
+## Error Handling
+- Use custom exception classes for domain-specific errors
+- Leverage Laravel's exception handling for consistent responses
+- Validate requests using Laravel's form request validation
+- Use typed exceptions with PHP 8's union types
+
+## Code Quality Maintenance
+- Configure Larastan/PHPStan at level 8 or higher
+- Use Laravel Pint for consistent code formatting
+- Implement CI/CD pipelines with automated quality checks
+- Regularly update dependencies with Dependabot
+
+## Testing
+- Write feature tests for critical user journeys
+- Use Pest PHP for more expressive test syntax
+- Mock external services with Laravel's testing tools
+- Test database operations with Laravel's database transactions
+
+## Version Control
+- Follow conventional commits (feat, fix, docs, etc.)
+- Use GitHub Actions for automated testing and deployment
+- Create meaningful PR descriptions with context and screenshots
+- Squash commits before merging to maintain a clean history

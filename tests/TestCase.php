@@ -25,12 +25,12 @@ class TestCase extends Orchestra
         config()->set('filesystems.disks.oci', [
             'driver' => 'oci',
             'namespace' => 'test-namespace',
-            'region' => 'test-region',
+            'region' => 'us-phoenix-1',
             'bucket' => 'test-bucket',
-            'tenancy_id' => 'test-tenancy-id',
-            'user_id' => 'test-user-id',
+            'tenancy_id' => 'ocid1.tenancy.oc1..test',
+            'user_id' => 'ocid1.user.oc1..test',
             'storage_tier' => 'Standard',
-            'key_fingerprint' => 'test-key-fingerprint',
+            'key_fingerprint' => 'aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99',
             'key_path' => __DIR__.'/test-key.pem',
         ]);
     }

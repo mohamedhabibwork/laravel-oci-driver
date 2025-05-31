@@ -16,7 +16,7 @@
         }
     ],
     "require": {
-        "php": "^8.2 | ^8.3| ^8.4",
+        "php": "^8.2 || ^8.3 || ^8.4",
         "spatie/laravel-package-tools": "^1.16",
         "illuminate/contracts": "^10.0||^11.0||^12.0"
     },
@@ -35,8 +35,7 @@
     },
     "autoload": {
         "psr-4": {
-            "LaravelOCI\\LaravelOciDriver\\": "src/",
-            "LaravelOCI\\LaravelOciDriver\\Database\\Factories\\": "database/factories/"
+            "LaravelOCI\\LaravelOciDriver\\": "src/"
         }
     },
     "autoload-dev": {
@@ -66,7 +65,7 @@
                 "LaravelOCI\\LaravelOciDriver\\LaravelOciDriverServiceProvider"
             ],
             "aliases": {
-                "LaravelOciDriver": "LaravelOCI\\LaravelOciDriver\\Facades\\LaravelOciDriver"
+                "LaravelOciDriver": "LaravelOciDriverFacade"
             }
         }
     },
