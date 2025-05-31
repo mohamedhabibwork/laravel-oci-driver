@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Facade;
 /**
  * @see \LaravelOCI\LaravelOciDriver\LaravelOciDriver
  */
-class LaravelOciDriver extends Facade
+class LaravelOciDriverFacade extends Facade
 {
     protected static function getFacadeAccessor(): string
     {
