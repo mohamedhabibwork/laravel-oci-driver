@@ -471,6 +471,7 @@ final readonly class OciConfig
         }
         // Normalize: remove leading/trailing slashes, but keep empty string if not set
         $prefix = trim($prefix, '/');
+
         return $prefix !== '' ? $prefix.'/' : '';
     }
 }

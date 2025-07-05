@@ -262,7 +262,7 @@ final class LaravelOciDriverTest extends TestCase
         ];
         $client = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($config);
         $filePath = 'test-file.txt';
-        $expected = $prefix . '/' . $filePath;
+        $expected = $prefix.'/'.$filePath;
         $actual = $client->getPrefixedPath($filePath);
         expect($actual)->toBe($expected);
     }
