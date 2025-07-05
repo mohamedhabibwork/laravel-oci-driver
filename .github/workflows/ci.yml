@@ -37,10 +37,12 @@ jobs:
         laravel: ["11.*", "12.*"]
         stability: [prefer-stable]
         include:
+          - laravel: "10.*"
+            testbench: "10.*"
           - laravel: "11.*"
-            testbench: "11.*"
+            testbench: "10.*"
           - laravel: "12.*"
-            testbench: "12.*"
+            testbench: "10.*"
         exclude:
           # Exclude PHP 8.3 with Laravel 12.* if not compatible
           - php: "8.3"
