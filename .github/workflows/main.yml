@@ -19,15 +19,12 @@ jobs:
       should-run-tests: ${{ steps.changes.outputs.should-run-tests }}
       should-run-analysis: ${{ steps.changes.outputs.should-run-analysis }}
       should-run-security: ${{ steps.changes.outputs.should-run-security }}
-      config-exists: ${{ steps.check_config.outputs.exists }}
     steps:
       - name: Check config exists
-        id: check_config
         run: |
           if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "exists=false" >> $GITHUB_OUTPUT
-          else
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Config file missing, skipping job."
+            exit 78
           fi
 
       - name: Checkout code
@@ -90,12 +87,10 @@ jobs:
 
     steps:
       - name: Check config exists
-        id: check_config
         run: |
           if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "exists=false" >> $GITHUB_OUTPUT
-          else
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Config file missing, skipping job."
+            exit 78
           fi
 
       - name: Generate summary
