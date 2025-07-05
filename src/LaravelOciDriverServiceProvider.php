@@ -11,6 +11,7 @@ use LaravelOCI\LaravelOciDriver\Commands\LaravelOciDriverCommand;
 use LaravelOCI\LaravelOciDriver\Commands\OciConfigCommand;
 use LaravelOCI\LaravelOciDriver\Commands\OciConnectionCommand;
 use LaravelOCI\LaravelOciDriver\Commands\OciSetupCommand;
+use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use League\Flysystem\Filesystem;
 use Spatie\LaravelPackageTools\Commands\InstallCommand;
 use Spatie\LaravelPackageTools\Package;
@@ -79,10 +80,9 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
     {
         Storage::extend('oci', function ($app, $config) {
             // Validate configuration before creating client
-            $this->validateOciConfiguration($config);
-
+            $ociConfig = OciConfig::fromDisk($config['driver'] ?? 'oci', $config['connection'] ?? 'default');
             try {
-                $client = OciClient::createWithConfiguration($config);
+                $client = OciClient::createWithConfiguration($ociConfig);
                 $adapter = new OciAdapter($client);
 
                 $filesystemAdapter = new FilesystemAdapter(
@@ -168,8 +168,14 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
     protected function validateOciConfiguration(array $config): void
     {
         $requiredKeys = [
-            'namespace', 'region', 'bucket', 'tenancy_id',
-            'user_id', 'storage_tier', 'key_fingerprint', 'key_path',
+            'namespace',
+            'region',
+            'bucket',
+            'tenancy_id',
+            'user_id',
+            'storage_tier',
+            'key_fingerprint',
+            'key_path',
         ];
 
         $missingKeys = array_diff($requiredKeys, array_keys($config));
@@ -215,7 +221,8 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
         $validTiers = ['Standard', 'InfrequentAccess', 'Archive'];
         if (! in_array($config['storage_tier'], $validTiers, true)) {
             throw new \InvalidArgumentException(
-                sprintf('Invalid storage tier: %s. Valid options: %s',
+                sprintf(
+                    'Invalid storage tier: %s. Valid options: %s',
                     $config['storage_tier'],
                     implode(', ', $validTiers)
                 )

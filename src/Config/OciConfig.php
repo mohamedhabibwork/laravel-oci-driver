@@ -31,7 +31,7 @@ final readonly class OciConfig
      */
     public static function fromConnection(string $connection = 'default'): static
     {
-        $config = config("filesystems.disks.{$connection}", config("laravel-oci-driver.connections.{$connection}", []));
+        $config = config("laravel-oci-driver.connections.{$connection}", []);
 
         if (empty($config)) {
             throw new \InvalidArgumentException("OCI connection '{$connection}' not found in configuration");
@@ -45,9 +45,9 @@ final readonly class OciConfig
      *
      * @param  string  $disk  Disk name
      */
-    public static function fromDisk(string $disk = 'oci'): static
+    public static function fromDisk(string $disk = 'oci', string $connection = 'default'): static
     {
-        $config = config("filesystems.disks.{$disk}", []);
+        $config = config("filesystems.disks.{$disk}", config("laravel-oci-driver.connections.{$connection}", []));
 
         if (empty($config) || ($config['driver'] ?? null) !== 'oci') {
             throw new \InvalidArgumentException("OCI disk '{$disk}' not found or not configured");
@@ -293,8 +293,13 @@ final readonly class OciConfig
         $errors = [];
 
         $requiredKeys = [
-            'tenancy_id', 'user_id', 'key_fingerprint', 'key_path',
-            'namespace', 'region', 'bucket',
+            'tenancy_id',
+            'user_id',
+            'key_fingerprint',
+            'key_path',
+            'namespace',
+            'region',
+            'bucket',
         ];
 
         foreach ($requiredKeys as $key) {
@@ -432,6 +437,7 @@ final readonly class OciConfig
             'cache_enabled' => $this->isCacheEnabled(),
             'logging_enabled' => $this->isLoggingEnabled(),
             'log_level' => $this->getLogLevel()->value(),
+            'url_path_prefix' => $this->getUrlPathPrefix(),
         ];
     }
 
@@ -470,7 +476,7 @@ final readonly class OciConfig
             return '';
         }
         // Normalize: remove leading/trailing slashes, but keep empty string if not set
-        $prefix = trim($prefix, '/');
+        $prefix = trim($prefix, '/ ');
 
         return $prefix !== '' ? $prefix.'/' : '';
     }

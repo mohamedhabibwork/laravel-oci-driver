@@ -51,7 +51,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     private function exists(string $path): bool
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -84,7 +85,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function writeStream(string $path, $contents, Config $config): void
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         $body = stream_get_contents($contents);
         $mime = finfo_buffer(finfo_open(FILEINFO_MIME_TYPE), $body);
@@ -116,7 +118,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function read(string $path): string
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'GET');
@@ -141,7 +144,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function readStream(string $path)
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'GET');
@@ -169,13 +173,12 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function deleteDirectory(string $path): void
     {
-        // Normalize the directory path with a trailing slash
-        $dirPath = rtrim($path, '/').'/';
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $dirPath = rtrim($prefixedPath, '/').'/';
 
         // List all objects in the bucket with the directory prefix
         $uri = sprintf('%s/o', $this->client->getBucketUri());
         $queryParams = ['prefix' => $dirPath];
-        $requestUri = $uri.'?'.http_build_query($queryParams);
         $requestUri = $uri.'?'.http_build_query($queryParams);
 
         try {
@@ -227,18 +230,14 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function delete(string $path): void
     {
-        // Check if the path ends with a slash or is empty, indicating a potential directory
-        $isDirectoryPath = $path === '' || str_ends_with($path, '/');
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $isDirectoryPath = $prefixedPath === '' || str_ends_with($prefixedPath, '/');
 
         // If it appears to be a directory, check if it has contents
         if ($isDirectoryPath) {
-            // Normalize the directory path with a trailing slash
-            $dirPath = rtrim($path, '/').'/';
-
-            // List objects with this prefix to check if directory has contents
-            $uri = sprintf('%s/o', $this->client->getBucketUri());
+            $dirPath = rtrim($prefixedPath, '/').'/';
             $queryParams = ['prefix' => $dirPath, 'limit' => 1]; // Just need to know if at least one object exists
-            $requestUri = $uri.'?'.http_build_query($queryParams);
+            $requestUri = sprintf('%s/o', $this->client->getBucketUri()).'?'.http_build_query($queryParams);
 
             try {
                 $response = $this->client->send($requestUri, 'GET');
@@ -263,7 +262,7 @@ final readonly class OciAdapter implements FilesystemAdapter
         }
 
         // Otherwise, proceed with single file deletion
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'DELETE');
@@ -289,7 +288,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function createDirectory(string $path, Config $config): void
     {
-        $this->write($path.'/', '', $config);
+        $this->write($path, '', $config);
     }
 
     /**
@@ -305,7 +304,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function write(string $path, string $contents, Config $config): void
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             // Determine content type
@@ -497,7 +497,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function mimeType(string $path): FileAttributes
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -525,7 +526,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function lastModified(string $path): FileAttributes
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -553,7 +555,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function fileSize(string $path): FileAttributes
     {
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($path));
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -584,8 +587,9 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function listContents(string $path, bool $deep): iterable
     {
-        $path = rtrim($path, '/');
-        $prefix = ! empty($path) ? $path.'/' : '';
+        $prefixedPath = $this->client->getPrefixedPath($path);
+        $prefix = rtrim($prefixedPath, '/');
+        $prefix = ! empty($prefix) ? $prefix.'/' : '';
         $delimiter = $deep ? null : '/';
 
         try {
@@ -608,8 +612,10 @@ final readonly class OciAdapter implements FilesystemAdapter
                 }
 
                 // For non-recursive listing, skip nested objects
-                if (! $deep && ! empty($prefix) &&
-                    str_contains(substr($object['name'], strlen($prefix)), '/')) {
+                if (
+                    ! $deep && ! empty($prefix) &&
+                    str_contains(substr($object['name'], strlen($prefix)), '/')
+                ) {
                     continue;
                 }
 
@@ -677,9 +683,10 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function move(string $source, string $destination, Config $config): void
     {
+        $prefixedSource = $this->client->getPrefixedPath($source);
+        $prefixedDestination = $this->client->getPrefixedPath($destination);
         try {
-            // Use the more efficient native renameObject API
-            $success = $this->client->renameObject($source, $destination);
+            $success = $this->client->renameObject($prefixedSource, $prefixedDestination);
 
             if (! $success) {
                 throw \League\Flysystem\UnableToMoveFile::because(
@@ -691,8 +698,8 @@ final readonly class OciAdapter implements FilesystemAdapter
         } catch (GuzzleException $exception) {
             // Fall back to copy + delete if rename fails
             try {
-                $this->copy($source, $destination, $config);
-                $this->delete($source);
+                $this->copy($prefixedSource, $prefixedDestination, $config);
+                $this->delete($prefixedSource);
             } catch (\Exception $e) {
                 throw \League\Flysystem\UnableToMoveFile::fromLocationTo(
                     $source,
@@ -716,6 +723,8 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function copy(string $source, string $destination, Config $config): void
     {
+        $prefixedSource = $this->client->getPrefixedPath($source);
+        $prefixedDestination = $this->client->getPrefixedPath($destination);
         $uri = sprintf('%s/actions/copyObject', $this->client->getBucketUri());
 
         // Extract any custom storage tier or content-type from config
@@ -723,11 +732,11 @@ final readonly class OciAdapter implements FilesystemAdapter
         $contentType = $config->get('content_type');
 
         $body = json_encode([
-            'sourceObjectName' => $source,
+            'sourceObjectName' => $prefixedSource,
             'destinationRegion' => $this->client->getRegion(),
             'destinationNamespace' => $this->client->getNamespace(),
             'destinationBucket' => $this->client->getBucket(),
-            'destinationObjectName' => $destination,
+            'destinationObjectName' => $prefixedDestination,
             'destinationStorageTier' => $destinationStorageTier,
             // Include metadata directives and content-type if specified
             ...($contentType ? ['contentType' => $contentType] : []),
@@ -765,7 +774,9 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function restore(string $path, int $hours = 24): bool
     {
-        return $this->client->restoreObjects([$path], $hours);
+        $prefixedPath = $this->client->getPrefixedPath($path);
+
+        return $this->client->restoreObjects([$prefixedPath], $hours);
     }
 
     /**
@@ -780,11 +791,12 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function updateStorageTier(string $path, string|StorageTier $storageTier): bool
     {
+        $prefixedPath = $this->client->getPrefixedPath($path);
         if (is_string($storageTier)) {
             $storageTier = StorageTier::fromString($storageTier);
         }
 
-        return $this->client->updateObjectStorageTier($path, $storageTier);
+        return $this->client->updateObjectStorageTier($prefixedPath, $storageTier);
     }
 
     /**
@@ -795,12 +807,23 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function getUrl($path): string
     {
-        $expiresAt = now()->addDay();
+        // https://objectstorage.{reg}.oraclecloud.com/n/{namespace}/b/{bucket}/o/{path}
+        $namespace = $this->client->getNamespace();
+        $bucket = $this->client->getBucket();
+        $prefixedPath = $this->client->getPrefixedPath($path);
 
-        return cache()->remember(
-            key: 'oci_url_'.$path,
-            ttl: $expiresAt,
-            callback: fn () => $this->client->createTemporaryUrl($path, $expiresAt)
-        );
+        return "https://objectstorage.{$this->client->getRegion()}.oraclecloud.com/n/{$namespace}/b/{$bucket}/o/{$prefixedPath}";
+    }
+
+    /**
+     * Create a temporary URL for a file
+     *
+     * @param  string  $path  File path
+     * @param  \Carbon\Carbon|null  $expiresAt  Expiration time (defaults to 1 hour from now)
+     * @return string Temporary URL or empty string if creation failed
+     */
+    public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null): string
+    {
+        return $this->client->createTemporaryUrl($path, $expiresAt);
     }
 }

@@ -266,4 +266,114 @@ final class LaravelOciDriverTest extends TestCase
         $actual = $client->getPrefixedPath($filePath);
         expect($actual)->toBe($expected);
     }
+
+    public function test_driver_prefix_functionality_comprehensive(): void
+    {
+        $testCases = [
+            ['prefix' => 'app/uploads', 'path' => 'file.txt', 'expected' => 'app/uploads/file.txt'],
+            ['prefix' => 'app/uploads', 'path' => 'folder/file.txt', 'expected' => 'app/uploads/folder/file.txt'],
+            ['prefix' => '/app/uploads/', 'path' => '/file.txt', 'expected' => 'app/uploads/file.txt'],
+            ['prefix' => 'documents', 'path' => 'report.pdf', 'expected' => 'documents/report.pdf'],
+            ['prefix' => '', 'path' => 'file.txt', 'expected' => 'file.txt'],
+        ];
+
+        foreach ($testCases as $case) {
+            $config = [
+                'tenancy_id' => 'test-tenancy',
+                'user_id' => 'test-user',
+                'key_fingerprint' => '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
+                'key_path' => '/dev/null',
+                'namespace' => 'test-namespace',
+                'region' => 'us-phoenix-1',
+                'bucket' => 'test-bucket',
+                'url_path_prefix' => $case['prefix'],
+                'storage_tier' => 'Standard',
+            ];
+
+            $client = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($config);
+            $actual = $client->getPrefixedPath($case['path']);
+            expect($actual)->toBe($case['expected']);
+        }
+    }
+
+    public function test_driver_prefix_removal_functionality(): void
+    {
+        $config = [
+            'tenancy_id' => 'test-tenancy',
+            'user_id' => 'test-user',
+            'key_fingerprint' => '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
+            'key_path' => '/dev/null',
+            'namespace' => 'test-namespace',
+            'region' => 'us-phoenix-1',
+            'bucket' => 'test-bucket',
+            'url_path_prefix' => 'app/uploads',
+            'storage_tier' => 'Standard',
+        ];
+
+        $client = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($config);
+
+        // Test removing prefix from paths
+        expect($client->removePrefixFromPath('app/uploads/file.txt'))->toBe('file.txt');
+        expect($client->removePrefixFromPath('app/uploads/folder/file.txt'))->toBe('folder/file.txt');
+        expect($client->removePrefixFromPath('other/path/file.txt'))->toBe('other/path/file.txt');
+        expect($client->removePrefixFromPath('file.txt'))->toBe('file.txt');
+    }
+
+    public function test_driver_prefix_enabled_detection(): void
+    {
+        // Test with prefix enabled
+        $configWithPrefix = [
+            'tenancy_id' => 'test-tenancy',
+            'user_id' => 'test-user',
+            'key_fingerprint' => '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
+            'key_path' => '/dev/null',
+            'namespace' => 'test-namespace',
+            'region' => 'us-phoenix-1',
+            'bucket' => 'test-bucket',
+            'url_path_prefix' => 'my-prefix',
+            'storage_tier' => 'Standard',
+        ];
+
+        $clientWithPrefix = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($configWithPrefix);
+        expect($clientWithPrefix->isPrefixEnabled())->toBeTrue();
+        expect($clientWithPrefix->getPrefix())->toBe('my-prefix');
+
+        // Test without prefix
+        $configWithoutPrefix = [
+            'tenancy_id' => 'test-tenancy',
+            'user_id' => 'test-user',
+            'key_fingerprint' => '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
+            'key_path' => '/dev/null',
+            'namespace' => 'test-namespace',
+            'region' => 'us-phoenix-1',
+            'bucket' => 'test-bucket',
+            'storage_tier' => 'Standard',
+        ];
+
+        $clientWithoutPrefix = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($configWithoutPrefix);
+        expect($clientWithoutPrefix->isPrefixEnabled())->toBeFalse();
+        expect($clientWithoutPrefix->getPrefix())->toBe('');
+    }
+
+    public function test_driver_with_oci_config_and_prefix(): void
+    {
+        $configArray = [
+            'tenancy_id' => 'test-tenancy',
+            'user_id' => 'test-user',
+            'key_fingerprint' => '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
+            'key_path' => '/dev/null',
+            'namespace' => 'test-namespace',
+            'region' => 'us-phoenix-1',
+            'bucket' => 'test-bucket',
+            'url_path_prefix' => 'config-prefix',
+            'storage_tier' => 'Standard',
+        ];
+
+        $ociConfig = new \LaravelOCI\LaravelOciDriver\Config\OciConfig($configArray);
+        $client = \LaravelOCI\LaravelOciDriver\OciClient::fromOciConfig($ociConfig);
+
+        expect($client->isPrefixEnabled())->toBeTrue();
+        expect($client->getPrefix())->toBe('config-prefix');
+        expect($client->getPrefixedPath('test.txt'))->toBe('config-prefix/test.txt');
+    }
 }

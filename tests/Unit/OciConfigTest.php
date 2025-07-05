@@ -201,12 +201,79 @@ final class OciConfigTest extends TestCase
 
     public function test_can_clone_with_overrides(): void
     {
+        $config = new OciConfig($this->validConfig);
+        $overrides = ['bucket' => 'new-bucket', 'region' => 'us-ashburn-1'];
+
+        $newConfig = $config->withOverrides($overrides);
+
+        expect($newConfig->getBucket())->toBe('new-bucket');
+        expect($newConfig->getRegion())->toBe('us-ashburn-1');
+        expect($newConfig->getNamespace())->toBe($this->validConfig['namespace']);
+    }
+
+    public function test_can_get_url_path_prefix(): void
+    {
+        $config = new OciConfig($this->validConfig);
+        expect($config->getUrlPathPrefix())->toBe('');
+
+        $configWithPrefix = new OciConfig(array_merge($this->validConfig, [
+            'url_path_prefix' => 'my-prefix',
+        ]));
+        expect($configWithPrefix->getUrlPathPrefix())->toBe('my-prefix/');
+
+        $configWithSlashes = new OciConfig(array_merge($this->validConfig, [
+            'url_path_prefix' => '/my-prefix/',
+        ]));
+        expect($configWithSlashes->getUrlPathPrefix())->toBe('my-prefix/');
+    }
+
+    public function test_url_path_prefix_handles_empty_values(): void
+    {
+        $configWithEmpty = new OciConfig(array_merge($this->validConfig, [
+            'url_path_prefix' => '',
+        ]));
+        expect($configWithEmpty->getUrlPathPrefix())->toBe('');
+
+        $configWithNull = new OciConfig(array_merge($this->validConfig, [
+            'url_path_prefix' => null,
+        ]));
+        expect($configWithNull->getUrlPathPrefix())->toBe('');
+
+        $configWithSpaces = new OciConfig(array_merge($this->validConfig, [
+            'url_path_prefix' => '   ',
+        ]));
+        expect($configWithSpaces->getUrlPathPrefix())->toBe('');
+    }
+
+    public function test_url_path_prefix_normalizes_paths(): void
+    {
+        $testCases = [
+            'simple' => 'simple/',
+            'nested/path' => 'nested/path/',
+            '/leading-slash' => 'leading-slash/',
+            'trailing-slash/' => 'trailing-slash/',
+            '/both-slashes/' => 'both-slashes/',
+            'deep/nested/path' => 'deep/nested/path/',
+            'with-dashes-and_underscores' => 'with-dashes-and_underscores/',
+        ];
+
+        foreach ($testCases as $input => $expected) {
+            $config = new OciConfig(array_merge($this->validConfig, [
+                'url_path_prefix' => $input,
+            ]));
+            expect($config->getUrlPathPrefix())->toBe($expected);
+        }
+    }
+
+    public function test_can_clone_with_overrides_comprehensive(): void
+    {
         $originalConfig = new OciConfig($this->validConfig);
 
         $overrides = [
             'bucket' => 'new-bucket',
             'storage_tier' => 'Archive',
             'timeout' => 60,
+            'url_path_prefix' => 'new-prefix',
         ];
 
         $newConfig = $originalConfig->withOverrides($overrides);
@@ -215,15 +282,30 @@ final class OciConfigTest extends TestCase
         expect($originalConfig->getBucket())->toBe('test-bucket');
         expect($originalConfig->getStorageTier())->toBe(StorageTier::STANDARD);
         expect($originalConfig->getTimeout())->toBe(30);
+        expect($originalConfig->getUrlPathPrefix())->toBe('');
 
         // New config should have overrides
         expect($newConfig->getBucket())->toBe('new-bucket');
         expect($newConfig->getStorageTier())->toBe(StorageTier::ARCHIVE);
         expect($newConfig->getTimeout())->toBe(60);
+        expect($newConfig->getUrlPathPrefix())->toBe('new-prefix/');
 
         // Other values should remain the same
         expect($newConfig->getTenancyId())->toBe($originalConfig->getTenancyId());
         expect($newConfig->getUserId())->toBe($originalConfig->getUserId());
+    }
+
+    public function test_prefix_in_connection_summary(): void
+    {
+        $configWithPrefix = new OciConfig(array_merge($this->validConfig, [
+            'url_path_prefix' => 'my-app/uploads',
+        ]));
+
+        $summary = $configWithPrefix->getConnectionSummary();
+
+        expect($summary)->toBeArray();
+        expect($summary)->toHaveKey('url_path_prefix');
+        expect($summary['url_path_prefix'])->toBe('my-app/uploads/');
     }
 
     public function test_static_methods_for_connection_management(): void

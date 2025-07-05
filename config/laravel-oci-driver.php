@@ -73,35 +73,92 @@ return [
                 'channel' => env('OCI_LOG_CHANNEL', 'default'),
             ],
             'url_path_prefix' => env('OCI_URL_PATH_PREFIX', ''), // Optional: Prefix for all object paths
+
+            /*
+            |--------------------------------------------------------------------------
+            | URL Path Prefix Configuration
+            |--------------------------------------------------------------------------
+            |
+            | The url_path_prefix option allows you to organize all files under a
+            | specific prefix in your OCI bucket. This is useful for:
+            |
+            | - Multi-tenant applications (e.g., 'tenant-123/')
+            | - Environment separation (e.g., 'staging/', 'production/')
+            | - Application organization (e.g., 'app-name/uploads/')
+            | - Version control (e.g., 'v1/', 'v2/')
+            |
+            | Examples:
+            | - 'uploads' -> All files stored under 'uploads/' prefix
+            | - 'app/documents' -> Files stored under 'app/documents/' prefix
+            | - 'tenant-' . auth()->user()->tenant_id -> Dynamic tenant prefixes
+            | - env('APP_NAME') . '/files' -> Environment-based prefixes
+            |
+            | Note: Leading and trailing slashes are automatically normalized.
+            | Empty string or null disables prefixing.
+            |
+            */
         ],
 
         /*
         |--------------------------------------------------------------------------
-        | Example: Production Connection
+        | Example: Production Connection with Prefix
         |--------------------------------------------------------------------------
         |
-        | Example configuration for a production environment connection.
-        | Remove or modify this section based on your needs.
+        | This example shows a production connection with a prefix for organizing
+        | files in a structured way.
         |
         */
+
         'production' => [
             'tenancy_id' => env('OCI_PROD_TENANCY_ID'),
             'user_id' => env('OCI_PROD_USER_ID'),
             'key_fingerprint' => env('OCI_PROD_KEY_FINGERPRINT'),
             'key_path' => env('OCI_PROD_KEY_PATH'),
             'namespace' => env('OCI_PROD_NAMESPACE'),
-            'region' => env('OCI_PROD_REGION', 'us-phoenix-1'), // Use OciRegion enum values
+            'region' => env('OCI_PROD_REGION'),
             'bucket' => env('OCI_PROD_BUCKET'),
-            'storage_tier' => 'Standard',
-            'timeout' => 60, // Longer timeout for production
+            'storage_tier' => env('OCI_PROD_STORAGE_TIER', 'Standard'),
+            'url_path_prefix' => env('OCI_PROD_PREFIX', 'production'), // Organize production files
+            'timeout' => env('OCI_PROD_TIMEOUT', 60),
+            'retry_attempts' => env('OCI_PROD_RETRY_ATTEMPTS', 5),
             'cache' => [
-                'enabled' => true,
-                'ttl' => 600, // 10 minutes for production
+                'enabled' => env('OCI_PROD_CACHE_ENABLED', true),
+                'ttl' => env('OCI_PROD_CACHE_TTL', 600), // 10 minutes
+                'prefix' => env('OCI_PROD_CACHE_PREFIX', 'oci_prod'),
             ],
             'logging' => [
-                'enabled' => true,
-                'level' => 'warning', // Only warnings and above
-                'channel' => 'production',
+                'enabled' => env('OCI_PROD_LOGGING_ENABLED', true),
+                'level' => env('OCI_PROD_LOG_LEVEL', 'warning'),
+                'channel' => env('OCI_PROD_LOG_CHANNEL', 'production'),
+            ],
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
+        | Example: Multi-Tenant Connection
+        |--------------------------------------------------------------------------
+        |
+        | This example shows how to configure dynamic prefixes for multi-tenant
+        | applications where each tenant's files are isolated.
+        |
+        */
+
+        'tenant' => [
+            'tenancy_id' => env('OCI_TENANT_TENANCY_ID'),
+            'user_id' => env('OCI_TENANT_USER_ID'),
+            'key_fingerprint' => env('OCI_TENANT_KEY_FINGERPRINT'),
+            'key_path' => env('OCI_TENANT_KEY_PATH'),
+            'namespace' => env('OCI_TENANT_NAMESPACE'),
+            'region' => env('OCI_TENANT_REGION'),
+            'bucket' => env('OCI_TENANT_BUCKET'),
+            'storage_tier' => env('OCI_TENANT_STORAGE_TIER', 'Standard'),
+            // Dynamic prefix based on tenant - configure in your service provider
+            'url_path_prefix' => env('OCI_TENANT_PREFIX', 'tenants'), // Base prefix for all tenants
+            'timeout' => env('OCI_TENANT_TIMEOUT', 30),
+            'cache' => [
+                'enabled' => env('OCI_TENANT_CACHE_ENABLED', true),
+                'ttl' => env('OCI_TENANT_CACHE_TTL', 300),
+                'prefix' => env('OCI_TENANT_CACHE_PREFIX', 'oci_tenant'),
             ],
         ],
 
@@ -110,25 +167,31 @@ return [
         | Example: Development Connection
         |--------------------------------------------------------------------------
         |
-        | Example configuration for a development environment connection.
+        | Development connection with prefix for isolating development files.
         |
         */
+
         'development' => [
             'tenancy_id' => env('OCI_DEV_TENANCY_ID'),
             'user_id' => env('OCI_DEV_USER_ID'),
             'key_fingerprint' => env('OCI_DEV_KEY_FINGERPRINT'),
             'key_path' => env('OCI_DEV_KEY_PATH'),
             'namespace' => env('OCI_DEV_NAMESPACE'),
-            'region' => env('OCI_DEV_REGION', 'us-ashburn-1'),
+            'region' => env('OCI_DEV_REGION'),
             'bucket' => env('OCI_DEV_BUCKET'),
-            'storage_tier' => 'InfrequentAccess', // Cheaper for dev
+            'storage_tier' => env('OCI_DEV_STORAGE_TIER', 'Standard'),
+            'url_path_prefix' => env('OCI_DEV_PREFIX', 'development'), // Isolate dev files
+            'timeout' => env('OCI_DEV_TIMEOUT', 15),
+            'retry_attempts' => env('OCI_DEV_RETRY_ATTEMPTS', 2),
             'cache' => [
-                'enabled' => false, // Disable cache for development
+                'enabled' => env('OCI_DEV_CACHE_ENABLED', false), // Disable cache in dev
+                'ttl' => env('OCI_DEV_CACHE_TTL', 60),
+                'prefix' => env('OCI_DEV_CACHE_PREFIX', 'oci_dev'),
             ],
             'logging' => [
-                'enabled' => true,
-                'level' => 'debug', // Verbose logging for development
-                'channel' => 'development',
+                'enabled' => env('OCI_DEV_LOGGING_ENABLED', true),
+                'level' => env('OCI_DEV_LOG_LEVEL', 'debug'),
+                'channel' => env('OCI_DEV_LOG_CHANNEL', 'single'),
             ],
         ],
 
@@ -137,22 +200,29 @@ return [
         | Example: Backup Connection
         |--------------------------------------------------------------------------
         |
-        | Example configuration for backup storage.
+        | Backup connection with archive storage tier and organized prefixes.
         |
         */
+
         'backup' => [
             'tenancy_id' => env('OCI_BACKUP_TENANCY_ID'),
             'user_id' => env('OCI_BACKUP_USER_ID'),
             'key_fingerprint' => env('OCI_BACKUP_KEY_FINGERPRINT'),
             'key_path' => env('OCI_BACKUP_KEY_PATH'),
             'namespace' => env('OCI_BACKUP_NAMESPACE'),
-            'region' => env('OCI_BACKUP_REGION', 'eu-frankfurt-1'), // Different region for geo-redundancy
+            'region' => env('OCI_BACKUP_REGION'),
             'bucket' => env('OCI_BACKUP_BUCKET'),
-            'storage_tier' => 'Archive', // Cheapest for long-term storage
-            'timeout' => 120, // Longer timeout for archive operations
+            'storage_tier' => env('OCI_BACKUP_STORAGE_TIER', 'Archive'), // Cost-effective for backups
+            'url_path_prefix' => env('OCI_BACKUP_PREFIX', 'backups/'.date('Y/m')), // Organize by date
+            'timeout' => env('OCI_BACKUP_TIMEOUT', 120), // Longer timeout for large backups
+            'retry_attempts' => env('OCI_BACKUP_RETRY_ATTEMPTS', 3),
             'cache' => [
-                'enabled' => true,
-                'ttl' => 3600, // 1 hour cache for backup metadata
+                'enabled' => env('OCI_BACKUP_CACHE_ENABLED', false), // No cache for backups
+            ],
+            'logging' => [
+                'enabled' => env('OCI_BACKUP_LOGGING_ENABLED', true),
+                'level' => env('OCI_BACKUP_LOG_LEVEL', 'info'),
+                'channel' => env('OCI_BACKUP_LOG_CHANNEL', 'backup'),
             ],
         ],
     ],

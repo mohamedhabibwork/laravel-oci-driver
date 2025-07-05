@@ -627,4 +627,281 @@ class FileUploadTest extends TestCase
 - [Authentication Setup](AUTHENTICATION.md)
 - [API Reference](API_REFERENCE.md)
 - [Testing Guide](TESTING.md)
-- [Performance Guide](PERFORMANCE.md) 
+- [Performance Guide](PERFORMANCE.md)
+
+## File Operations
+
+### Basic File Operations
+
+```php
+use Illuminate\Support\Facades\Storage;
+
+// Store a file
+Storage::disk('oci')->put('documents/report.pdf', $content);
+
+// Read a file
+$content = Storage::disk('oci')->get('documents/report.pdf');
+
+// Check if file exists
+if (Storage::disk('oci')->exists('documents/report.pdf')) {
+    // File exists
+}
+
+// Delete a file
+Storage::disk('oci')->delete('documents/report.pdf');
+
+// Get file size
+$size = Storage::disk('oci')->size('documents/report.pdf');
+
+// Get last modified time
+$lastModified = Storage::disk('oci')->lastModified('documents/report.pdf');
+```
+
+## Prefix-based File Organization
+
+### Basic Prefix Usage
+
+Configure a prefix in your filesystem configuration:
+
+```php
+// config/filesystems.php
+'oci' => [
+    'driver' => 'oci',
+    // ... other config
+    'url_path_prefix' => 'uploads',
+],
+```
+
+Now all file operations are automatically prefixed:
+
+```php
+// Store file - actually stored as 'uploads/document.pdf'
+Storage::disk('oci')->put('document.pdf', $content);
+
+// Read file - reads from 'uploads/document.pdf'
+$content = Storage::disk('oci')->get('document.pdf');
+
+// List files - lists files under 'uploads/' prefix
+$files = Storage::disk('oci')->files();
+```
+
+### Multi-Tenant File Organization
+
+```php
+// config/filesystems.php
+'tenant_oci' => [
+    'driver' => 'oci',
+    // ... other config
+    'url_path_prefix' => '', // Will be set dynamically
+],
+```
+
+```php
+// In your service provider or middleware
+class TenantMiddleware
+{
+    public function handle($request, Closure $next)
+    {
+        if (auth()->check()) {
+            $tenantId = auth()->user()->tenant_id;
+            
+            // Dynamically set prefix for current tenant
+            config([
+                'filesystems.disks.tenant_oci.url_path_prefix' => "tenant-{$tenantId}"
+            ]);
+        }
+        
+        return $next($request);
+    }
+}
+
+// Now all operations are tenant-isolated
+Storage::disk('tenant_oci')->put('documents/contract.pdf', $content);
+// Stored as: tenant-123/documents/contract.pdf
+
+Storage::disk('tenant_oci')->get('documents/contract.pdf');
+// Reads from: tenant-123/documents/contract.pdf
+```
+
+### Environment-based Organization
+
+```php
+// config/filesystems.php
+'oci' => [
+    'driver' => 'oci',
+    // ... other config
+    'url_path_prefix' => env('APP_ENV', 'production'),
+],
+```
+
+```php
+// In production: files stored under 'production/' prefix
+// In staging: files stored under 'staging/' prefix
+// In development: files stored under 'development/' prefix
+
+Storage::disk('oci')->put('logs/app.log', $logContent);
+// Production: stored as 'production/logs/app.log'
+// Staging: stored as 'staging/logs/app.log'
+```
+
+### Date-based Backup Organization
+
+```php
+// config/filesystems.php
+'backup_oci' => [
+    'driver' => 'oci',
+    // ... other config
+    'url_path_prefix' => 'backups/' . date('Y/m'),
+    'storage_tier' => 'Archive', // Cost-effective for backups
+],
+```
+
+```php
+// Backup files organized by year and month
+Storage::disk('backup_oci')->put('database.sql', $backupContent);
+// Stored as: backups/2024/03/database.sql
+
+Storage::disk('backup_oci')->put('files.tar.gz', $filesBackup);
+// Stored as: backups/2024/03/files.tar.gz
+```
+
+### Application Module Organization
+
+```php
+// config/filesystems.php
+'oci_uploads' => [
+    'driver' => 'oci',
+    // ... other config
+    'url_path_prefix' => 'app/uploads',
+],
+
+'oci_documents' => [
+    'driver' => 'oci',
+    // ... other config  
+    'url_path_prefix' => 'app/documents',
+],
+
+'oci_media' => [
+    'driver' => 'oci',
+    // ... other config
+    'url_path_prefix' => 'app/media',
+],
+```
+
+```php
+// User uploads
+Storage::disk('oci_uploads')->put('avatar.jpg', $avatarContent);
+// Stored as: app/uploads/avatar.jpg
+
+// System documents
+Storage::disk('oci_documents')->put('terms.pdf', $termsContent);
+// Stored as: app/documents/terms.pdf
+
+// Media files
+Storage::disk('oci_media')->put('video.mp4', $videoContent);
+// Stored as: app/media/video.mp4
+```
+
+### Dynamic Prefix Configuration
+
+```php
+class FileService
+{
+    public function storeUserFile($userId, $filename, $content)
+    {
+        // Create a disk configuration with user-specific prefix
+        $diskConfig = config('filesystems.disks.oci');
+        $diskConfig['url_path_prefix'] = "users/{$userId}";
+        
+        // Create a new disk instance with the custom prefix
+        $disk = Storage::build($diskConfig);
+        
+        return $disk->put($filename, $content);
+        // Stored as: users/123/filename.ext
+    }
+    
+    public function storeProjectFile($projectId, $filename, $content)
+    {
+        $diskConfig = config('filesystems.disks.oci');
+        $diskConfig['url_path_prefix'] = "projects/{$projectId}/files";
+        
+        $disk = Storage::build($diskConfig);
+        
+        return $disk->put($filename, $content);
+        // Stored as: projects/456/files/filename.ext
+    }
+}
+```
+
+### Prefix Migration Example
+
+If you need to migrate files from one prefix to another:
+
+```php
+class PrefixMigrationCommand extends Command
+{
+    public function handle()
+    {
+        // Source disk (old prefix)
+        $sourceDisk = Storage::build([
+            'driver' => 'oci',
+            // ... config
+            'url_path_prefix' => 'old-prefix',
+        ]);
+        
+        // Destination disk (new prefix)
+        $destDisk = Storage::build([
+            'driver' => 'oci',
+            // ... config
+            'url_path_prefix' => 'new-prefix',
+        ]);
+        
+        // Get all files from source
+        $files = $sourceDisk->allFiles();
+        
+        foreach ($files as $file) {
+            $this->info("Migrating: {$file}");
+            
+            // Copy file to new prefix
+            $content = $sourceDisk->get($file);
+            $destDisk->put($file, $content);
+            
+            // Optionally delete from old prefix
+            // $sourceDisk->delete($file);
+        }
+        
+        $this->info('Migration completed!');
+    }
+}
+```
+
+### Working with OciClient Directly
+
+```php
+use LaravelOCI\LaravelOciDriver\Config\OciConfig;
+use LaravelOCI\LaravelOciDriver\OciClient;
+
+// Create client with prefix
+$config = OciConfig::fromDisk('oci'); // or fromConnection()
+$client = OciClient::fromOciConfig($config);
+
+// Check if prefix is enabled
+if ($client->isPrefixEnabled()) {
+    $prefix = $client->getPrefix();
+    echo "Using prefix: {$prefix}";
+}
+
+// Get prefixed path
+$prefixedPath = $client->getPrefixedPath('documents/file.pdf');
+echo $prefixedPath; // e.g., "uploads/documents/file.pdf"
+
+// Remove prefix from path (useful for display)
+$userFriendlyPath = $client->removePrefixFromPath('uploads/documents/file.pdf');
+echo $userFriendlyPath; // "documents/file.pdf"
+
+// List all objects under prefix
+$objects = $client->listPrefixedObjects([
+    'limit' => 100,
+    'prefix' => 'documents/', // Additional prefix within the main prefix
+]);
+``` 

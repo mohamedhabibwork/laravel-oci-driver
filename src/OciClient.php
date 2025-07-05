@@ -8,6 +8,7 @@ use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\RequestOptions;
 use Illuminate\Support\Facades\Log;
+use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
@@ -24,14 +25,29 @@ final readonly class OciClient
     ) {}
 
     /**
-     * Create a new instance with the given configuration.
+     * Create a new instance with the given configuration (array or OciConfig).
+     *
+     * @param  array<string, mixed>|OciConfig  $config
      */
-    public static function createWithConfiguration(array $config): self
+    public static function createWithConfiguration(array|OciConfig $config): self
     {
-        $instance = new self($config);
+        if ($config instanceof OciConfig) {
+            $configArray = $config->toArray();
+        } else {
+            $configArray = $config;
+        }
+        $instance = new self($configArray);
         $instance->validateConfiguration();
 
         return $instance;
+    }
+
+    /**
+     * Create a new instance from an OciConfig instance directly.
+     */
+    public static function fromOciConfig(OciConfig $ociConfig): self
+    {
+        return self::createWithConfiguration($ociConfig);
     }
 
     /**
@@ -42,8 +58,14 @@ final readonly class OciClient
     private function validateConfiguration(): void
     {
         $requiredKeys = [
-            'namespace', 'region', 'bucket', 'tenancy_id',
-            'user_id', 'storage_tier', 'key_fingerprint', 'key_path',
+            'namespace',
+            'region',
+            'bucket',
+            'tenancy_id',
+            'user_id',
+            'storage_tier',
+            'key_fingerprint',
+            'key_path',
         ];
 
         $missingKeys = array_diff($requiredKeys, array_keys($this->config));
@@ -104,11 +126,48 @@ final readonly class OciClient
      */
     private function applyPathPrefix(string $path): string
     {
-        $prefix = $this->config['url_path_prefix'] ?? '';
-        $prefix = trim($prefix, '/');
+        $prefix = $this->getPrefix();
+
+        // Normalize the path by removing leading slashes
         $path = ltrim($path, '/');
 
-        return $prefix !== '' ? $prefix.'/'.$path : $path;
+        // check if already starts with prefix
+        if (str_starts_with($path, $prefix)) {
+            return $path;
+        }
+
+        // If no prefix is configured, return the normalized path
+        if ($prefix === '') {
+            return $path;
+        }
+
+        // If path is empty after normalization, return just the prefix
+        if ($path === '') {
+            return $prefix;
+        }
+
+        return $prefix . '/' . $path;
+    }
+
+    /**
+     * Get the configured prefix.
+     */
+    public function getPrefix(): string
+    {
+        $prefix = $this->config['url_path_prefix'] ?? '';
+
+        // Normalize prefix: remove leading/trailing slashes
+        $prefix = trim($prefix, '/');
+
+        return $prefix;
+    }
+
+    /**
+     * Check if prefix is enabled and configured.
+     */
+    public function isPrefixEnabled(): bool
+    {
+        return $this->getPrefix() !== '';
     }
 
     /**
@@ -308,7 +367,7 @@ final readonly class OciClient
             return ['deleted' => $deleted, 'errors' => $errors];
         } catch (GuzzleException $exception) {
             // If the request totally failed, report all paths as errors
-            $errors = array_map(fn (string $path) => [
+            $errors = array_map(fn(string $path) => [
                 'path' => $path,
                 'error' => $exception->getMessage(),
             ], $paths);
@@ -379,7 +438,7 @@ final readonly class OciClient
         $uri = sprintf('%s/actions/restoreObjects', $this->getBucketUri());
 
         $bodyData = [
-            'objectNames' => array_map(fn ($p) => $this->applyPathPrefix($p), $paths),
+            'objectNames' => array_map(fn($p) => $this->applyPathPrefix($p), $paths),
             'hours' => $hours,
         ];
 
@@ -455,7 +514,7 @@ final readonly class OciClient
                     'content_type' => $metadata['Content-Type'] ?? null,
                     'storage_tier' => $metadata['Storage-Tier'] ?? null,
                     'etag' => $metadata['ETag'] ?? null,
-                    'metadata' => array_filter($metadata, fn ($key) => str_starts_with($key, 'x-amz-meta-'), ARRAY_FILTER_USE_KEY),
+                    'metadata' => array_filter($metadata, fn($key) => str_starts_with($key, 'x-amz-meta-'), ARRAY_FILTER_USE_KEY),
                 ];
             }
 
@@ -492,7 +551,7 @@ final readonly class OciClient
         ]);
 
         if (! empty($queryParams)) {
-            $uri .= '?'.http_build_query($queryParams);
+            $uri .= '?' . http_build_query($queryParams);
         }
 
         try {
@@ -514,5 +573,39 @@ final readonly class OciClient
     public function getPrefixedPath(string $path): string
     {
         return $this->applyPathPrefix($path);
+    }
+
+    /**
+     * Remove prefix from a path (useful for displaying user-friendly paths).
+     */
+    public function removePrefixFromPath(string $prefixedPath): string
+    {
+        $prefix = $this->getPrefix();
+
+        if ($prefix === '' || ! str_starts_with($prefixedPath, $prefix . '/')) {
+            return $prefixedPath;
+        }
+
+        return substr($prefixedPath, strlen($prefix) + 1);
+    }
+
+    /**
+     * Get all objects under the configured prefix.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    public function listPrefixedObjects(array $options = []): array
+    {
+        $prefix = $this->getPrefix();
+
+        // If prefix is configured, add it to the options
+        if ($prefix !== '') {
+            $options['prefix'] = isset($options['prefix'])
+                ? $prefix . '/' . ltrim($options['prefix'], '/')
+                : $prefix . '/';
+        }
+
+        return $this->listObjects($options);
     }
 }
