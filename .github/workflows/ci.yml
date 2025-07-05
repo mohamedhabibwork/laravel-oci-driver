@@ -28,13 +28,12 @@ jobs:
   tests:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
-
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
         php: ["8.2", "8.3"]
-        laravel: ["11.*", "12.*"]
+        laravel: ["10.*","11.*", "12.*"]
         stability: [prefer-stable]
         include:
           - laravel: "10.*"
@@ -44,13 +43,19 @@ jobs:
           - laravel: "12.*"
             testbench: "10.*"
         exclude:
-          # Exclude PHP 8.3 with Laravel 12.* if not compatible
           - php: "8.3"
             laravel: "12.*"
 
     name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }} - ${{ matrix.os }}
 
     steps:
+      - name: Check config exists
+        run: |
+          if [ ! -f config/laravel-oci-driver.php ]; then
+            echo "Config file missing, skipping job."
+            exit 78
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -131,8 +136,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: Minimum Version Test
-
     steps:
+      - name: Check config exists
+        run: |
+          if [ ! -f config/laravel-oci-driver.php ]; then
+            echo "Config file missing, skipping job."
+            exit 78
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
 

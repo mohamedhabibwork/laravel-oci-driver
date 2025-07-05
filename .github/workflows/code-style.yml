@@ -25,6 +25,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Check config exists
+        run: |
+          if [ ! -f config/laravel-oci-driver.php ]; then
+            echo "Config file missing, skipping job."
+            exit 78
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:

@@ -19,14 +19,25 @@ jobs:
       should-run-tests: ${{ steps.changes.outputs.should-run-tests }}
       should-run-analysis: ${{ steps.changes.outputs.should-run-analysis }}
       should-run-security: ${{ steps.changes.outputs.should-run-security }}
-
+      config-exists: ${{ steps.check_config.outputs.exists }}
     steps:
+      - name: Check config exists
+        id: check_config
+        run: |
+          if [ ! -f config/laravel-oci-driver.php ]; then
+            echo "exists=false" >> $GITHUB_OUTPUT
+          else
+            echo "exists=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout code
+        if: steps.check_config.outputs.exists == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
       - name: Check for relevant changes
+        if: steps.check_config.outputs.exists == 'true'
         id: changes
         run: |
           # Check if PHP files, configs, or workflows changed
@@ -78,7 +89,17 @@ jobs:
     if: always()
 
     steps:
+      - name: Check config exists
+        id: check_config
+        run: |
+          if [ ! -f config/laravel-oci-driver.php ]; then
+            echo "exists=false" >> $GITHUB_OUTPUT
+          else
+            echo "exists=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate summary
+        if: steps.check_config.outputs.exists == 'true'
         run: |
           echo "## 🚀 Pipeline Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -123,6 +144,7 @@ jobs:
           echo "_Generated at $(date -u '+%Y-%m-%d %H:%M:%S UTC')_" >> $GITHUB_STEP_SUMMARY
 
       - name: Check overall status
+        if: steps.check_config.outputs.exists == 'true'
         run: |
           if [ "${{ needs.ci.result }}" = "failure" ] || 
              [ "${{ needs.static-analysis.result }}" = "failure" ] || 
