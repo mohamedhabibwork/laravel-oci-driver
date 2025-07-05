@@ -107,7 +107,8 @@ final readonly class OciClient
         $prefix = $this->config['url_path_prefix'] ?? '';
         $prefix = trim($prefix, '/');
         $path = ltrim($path, '/');
-        return $prefix !== '' ? $prefix . '/' . $path : $path;
+
+        return $prefix !== '' ? $prefix.'/'.$path : $path;
     }
 
     /**
@@ -378,7 +379,7 @@ final readonly class OciClient
         $uri = sprintf('%s/actions/restoreObjects', $this->getBucketUri());
 
         $bodyData = [
-            'objectNames' => array_map(fn($p) => $this->applyPathPrefix($p), $paths),
+            'objectNames' => array_map(fn ($p) => $this->applyPathPrefix($p), $paths),
             'hours' => $hours,
         ];
 
