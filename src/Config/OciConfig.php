@@ -459,4 +459,18 @@ final readonly class OciConfig
 
         return config('app.env') === 'testing' || defined('PHPUNIT_RUNNING');
     }
+
+    /**
+     * Get URL path prefix for all object operations.
+     */
+    public function getUrlPathPrefix(): string
+    {
+        $prefix = $this->get('url_path_prefix', '');
+        if ($prefix === null) {
+            return '';
+        }
+        // Normalize: remove leading/trailing slashes, but keep empty string if not set
+        $prefix = trim($prefix, '/');
+        return $prefix !== '' ? $prefix.'/' : '';
+    }
 }

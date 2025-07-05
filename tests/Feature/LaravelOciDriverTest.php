@@ -33,9 +33,10 @@ final class LaravelOciDriverTest extends TestCase
         $path = 'test-file.txt';
         $expiresAt = now()->addHour();
 
-        // This would normally create a temporary URL
-        // In a real test environment with OCI credentials, this would work
-        expect(true)->toBeTrue(); // Placeholder assertion
+        $url = \LaravelOCI\LaravelOciDriver\LaravelOciDriver::temporaryUrl($path, $expiresAt);
+
+        expect($url)->toBeString();
+        expect($url)->toContain($path);
     }
 
     public function test_driver_can_upload_string_content(): void
@@ -243,5 +244,26 @@ final class LaravelOciDriverTest extends TestCase
         foreach ($methods as $method) {
             expect($method->isStatic())->toBeTrue();
         }
+    }
+
+    public function test_driver_applies_url_path_prefix_to_object_paths(): void
+    {
+        $prefix = 'my-prefix';
+        $config = [
+            'tenancy_id' => 'test-tenancy',
+            'user_id' => 'test-user',
+            'key_fingerprint' => '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00',
+            'key_path' => '/dev/null',
+            'namespace' => 'test-namespace',
+            'region' => 'us-phoenix-1',
+            'bucket' => 'test-bucket',
+            'url_path_prefix' => $prefix,
+            'storage_tier' => 'Standard',
+        ];
+        $client = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($config);
+        $filePath = 'test-file.txt';
+        $expected = $prefix . '/' . $filePath;
+        $actual = $client->getPrefixedPath($filePath);
+        expect($actual)->toBe($expected);
     }
 }

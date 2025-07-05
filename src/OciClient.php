@@ -100,6 +100,17 @@ final readonly class OciClient
     }
 
     /**
+     * Helper to apply the configured URL path prefix to an object path.
+     */
+    private function applyPathPrefix(string $path): string
+    {
+        $prefix = $this->config['url_path_prefix'] ?? '';
+        $prefix = trim($prefix, '/');
+        $path = ltrim($path, '/');
+        return $prefix !== '' ? $prefix . '/' . $path : $path;
+    }
+
+    /**
      * Create a temporary URL for a file.
      */
     public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null): string
@@ -110,7 +121,7 @@ final readonly class OciClient
         $bodyData = [
             'accessType' => 'ObjectRead',
             'name' => Uuid::uuid7()->toString(),
-            'objectName' => $path,
+            'objectName' => $this->applyPathPrefix($path),
             'timeExpires' => $expiresAt->toIso8601String(),
         ];
 
@@ -242,16 +253,14 @@ final readonly class OciClient
             return ['deleted' => [], 'errors' => []];
         }
 
-        // S3 API endpoint for bulk delete
         $uri = sprintf('%s?delete', $this->getBucketUri());
 
-        // Create the XML payload according to S3 API specs
         $xml = new \SimpleXMLElement('<Delete></Delete>');
-        $xml->addChild('Quiet', 'true'); // Quiet mode for simpler response
+        $xml->addChild('Quiet', 'true');
 
         foreach ($paths as $path) {
             $object = $xml->addChild('Object');
-            $object->addChild('Key', $path);
+            $object->addChild('Key', $this->applyPathPrefix($path));
         }
 
         $body = $xml->asXML();
@@ -323,8 +332,8 @@ final readonly class OciClient
         $uri = sprintf('%s/actions/renameObject', $this->getBucketUri());
 
         $bodyData = [
-            'sourceName' => $sourcePath,
-            'destinationName' => $destinationPath,
+            'sourceName' => $this->applyPathPrefix($sourcePath),
+            'destinationName' => $this->applyPathPrefix($destinationPath),
         ];
 
         $body = json_encode($bodyData);
@@ -369,7 +378,7 @@ final readonly class OciClient
         $uri = sprintf('%s/actions/restoreObjects', $this->getBucketUri());
 
         $bodyData = [
-            'objectNames' => $paths,
+            'objectNames' => array_map(fn($p) => $this->applyPathPrefix($p), $paths),
             'hours' => $hours,
         ];
 
@@ -400,7 +409,7 @@ final readonly class OciClient
      */
     public function updateObjectStorageTier(string $path, StorageTier $storageTier): bool
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), urlencode($path));
+        $uri = sprintf('%s/o/%s', $this->getBucketUri(), urlencode($this->applyPathPrefix($path)));
 
         try {
             $response = $this->send(
@@ -428,7 +437,7 @@ final readonly class OciClient
      */
     public function getObjectInfo(string $path): ?array
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), urlencode($path));
+        $uri = sprintf('%s/o/%s', $this->getBucketUri(), urlencode($this->applyPathPrefix($path)));
 
         try {
             $response = $this->send($uri, 'HEAD');
@@ -474,7 +483,7 @@ final readonly class OciClient
 
         // Valid options: prefix, delimiter, start, end, limit
         $queryParams = array_filter([
-            'prefix' => $options['prefix'] ?? null,
+            'prefix' => isset($options['prefix']) ? $this->applyPathPrefix($options['prefix']) : null,
             'delimiter' => $options['delimiter'] ?? null,
             'start' => $options['start'] ?? null,
             'end' => $options['end'] ?? null,
@@ -496,5 +505,13 @@ final readonly class OciClient
         } catch (GuzzleException $exception) {
             return [];
         }
+    }
+
+    /**
+     * Public method for testing: get the fully-prefixed object path.
+     */
+    public function getPrefixedPath(string $path): string
+    {
+        return $this->applyPathPrefix($path);
     }
 }

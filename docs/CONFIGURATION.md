@@ -37,6 +37,7 @@ The Laravel OCI Driver requires several configuration options to connect to Orac
 | `debug`            | Enable debug logging                             | `true`                             |
 | `log_level`        | Log verbosity                                    | `info`                             |
 | `log_channel`      | Laravel log channel                              | `default`                          |
+| `url_path_prefix`  | URL path prefix for object paths                  | `my-prefix`                        |
 
 **Advanced `options` example:**
 ```php
@@ -77,6 +78,7 @@ The Laravel OCI Driver requires several configuration options to connect to Orac
     ],
     'debug' => env('OCI_DEBUG', false),
     'log_level' => env('OCI_LOG_LEVEL', 'info'),
+    'url_path_prefix' => 'my-prefix',
 ],
 ```
 

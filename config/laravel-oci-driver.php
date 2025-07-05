@@ -72,6 +72,7 @@ return [
                 'level' => env('OCI_LOG_LEVEL', 'info'),
                 'channel' => env('OCI_LOG_CHANNEL', 'default'),
             ],
+            'url_path_prefix' => env('OCI_URL_PATH_PREFIX', ''), // Optional: Prefix for all object paths
         ],
 
         /*

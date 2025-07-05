@@ -1,7 +1,7 @@
 # Laravel OCI Driver
 
 <p align="center">
-  <img src="https://placehold.co/900x120/22223a/ffffff?text=Laravel+OCI+Driver+%7C+OCI+%E2%9E%9C+Laravel+Filesystem+%7C+Full+Docs+%F0%9F%93%9A+%7C+OCI+Cloud+Animation" alt="Laravel OCI Driver Banner" />
+  <img src="https://placehold.co/900x120/22223a/ffffff?text=Laravel+OCI+Driver+%7C+OCI+Laravel+Filesystem+%7C+Full+Docs" alt="Laravel OCI Driver" />
 </p>
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/mohamedhabibwork/laravel-oci-driver.svg?style=flat-square)](https://packagist.org/packages/mohamedhabibwork/laravel-oci-driver)
