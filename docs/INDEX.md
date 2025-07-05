@@ -2,6 +2,52 @@
 
 Welcome to the comprehensive documentation for the Laravel OCI Driver package. This documentation will help you get started, configure, and make the most of Oracle Cloud Infrastructure Object Storage integration with Laravel.
 
+## 🚀 Implemented Features
+
+- **Artisan Commands:**
+  - `oci:setup` – Create Oracle-compatible `.oci` folder, generate/copy key files, write config
+  - `oci:config` – Interactive configuration for OCI settings, with `--validate` to check config
+  - `oci:connection` – Manage multiple OCI connections: `list`, `test`, `switch`, `summary`
+  - `oci:status` – Check connection status, test file operations, and list files in a bucket
+
+- **Key Providers:**
+  - File-based (from file path)
+  - Environment-based (from env variable, supports base64)
+  - Custom providers via interface
+
+- **Enums:**
+  - `ConnectionType` (primary, secondary, backup, development, testing, staging, production, archive)
+  - `StorageTier` (Standard, InfrequentAccess, Archive)
+  - `LogLevel` (emergency, alert, critical, error, warning, notice, info, debug)
+
+- **Exception Handling:**
+  - `PrivateKeyFileNotFoundException`
+  - `SignerValidateException`
+  - `SigningValidationFailedException`
+
+- **Configuration:**
+  - All required OCI config: tenancy, user, fingerprint, key path, region, namespace, bucket, storage tier
+  - Optional: prefix, url, passphrase, advanced performance/cache options, debug/logging
+
+- **Integration:**
+  - Laravel filesystem disk driver (`oci`)
+  - Event system for file operations (upload, download, delete, etc.)
+  - Service provider auto-registers everything
+  - Health check and connection validation built-in
+
+## 🗺️ Roadmap
+
+- [ ] Advanced Health Checks (Spatie Health integration)
+- [ ] Connection Pooling and advanced parallel/multipart upload support
+- [ ] Custom Event Listeners for all storage operations
+- [ ] Improved Error Reporting and user-friendly CLI output
+- [ ] Web UI for Connection Management
+- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
+- [ ] Automatic Key Rotation
+- [ ] Enhanced Documentation & Examples
+- [ ] Support for Additional OCI Services (beyond Object Storage)
+- [ ] Performance Benchmarks and Tuning Guides
+
 ## 📚 Documentation Overview
 
 ### 🚀 Getting Started

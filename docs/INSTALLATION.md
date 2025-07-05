@@ -1,5 +1,7 @@
 # Installation Guide
 
+> **Note:** For a summary of currently implemented features and the project roadmap, see the [README](../README.md).
+
 This guide provides detailed installation instructions for different environments and use cases.
 
 ## Table of Contents
@@ -548,3 +550,18 @@ If you encounter issues not covered here:
 ---
 
 **Next Steps**: After successful installation, see the [Configuration Guide](CONFIGURATION.md) for detailed setup instructions.
+
+## 🗺️ Roadmap
+
+See the [README](../README.md) for the most up-to-date roadmap and planned features.
+
+- [ ] Advanced Health Checks (Spatie Health integration)
+- [ ] Connection Pooling and advanced parallel/multipart upload support
+- [ ] Custom Event Listeners for all storage operations
+- [ ] Improved Error Reporting and user-friendly CLI output
+- [ ] Web UI for Connection Management
+- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
+- [ ] Automatic Key Rotation
+- [ ] Enhanced Documentation & Examples
+- [ ] Support for Additional OCI Services (beyond Object Storage)
+- [ ] Performance Benchmarks and Tuning Guides

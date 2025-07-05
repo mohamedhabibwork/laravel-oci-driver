@@ -1,6 +1,8 @@
 # API Reference
 
-Complete API reference for the Laravel OCI Driver package.
+> **Note:** For a summary of currently implemented features and the project roadmap, see the [README](../README.md) or the documentation index.
+
+This API reference documents all available methods and options for the Laravel OCI Driver. Only features listed in the Implemented Features section are guaranteed to be available.
 
 ## Table of Contents
 
@@ -931,3 +933,18 @@ protected $listen = [
 ---
 
 For more examples and detailed usage instructions, see the main [README](../README.md) and other documentation files.
+
+## 🗺️ Roadmap
+
+See the [README](../README.md) for the most up-to-date roadmap and planned features.
+
+- [ ] Advanced Health Checks (Spatie Health integration)
+- [ ] Connection Pooling and advanced parallel/multipart upload support
+- [ ] Custom Event Listeners for all storage operations
+- [ ] Improved Error Reporting and user-friendly CLI output
+- [ ] Web UI for Connection Management
+- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
+- [ ] Automatic Key Rotation
+- [ ] Enhanced Documentation & Examples
+- [ ] Support for Additional OCI Services (beyond Object Storage)
+- [ ] Performance Benchmarks and Tuning Guides

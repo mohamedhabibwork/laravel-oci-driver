@@ -1,5 +1,9 @@
 # Laravel OCI Driver
 
+<p align="center">
+  <img src="https://placehold.co/900x120/22223a/ffffff?text=Laravel+OCI+Driver+%7C+OCI+%E2%9E%9C+Laravel+Filesystem+%7C+Full+Docs+%F0%9F%93%9A+%7C+OCI+Cloud+Animation" alt="Laravel OCI Driver Banner" />
+</p>
+
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/mohamedhabibwork/laravel-oci-driver.svg?style=flat-square)](https://packagist.org/packages/mohamedhabibwork/laravel-oci-driver)
 [![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/mohamedhabibwork/laravel-oci-driver/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/mohamedhabibwork/laravel-oci-driver/actions?query=workflow%3Arun-tests+branch%3Amain)
 [![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/mohamedhabibwork/laravel-oci-driver/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/mohamedhabibwork/laravel-oci-driver/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
@@ -16,216 +20,89 @@ composer require mohamedhabibwork/laravel-oci-driver
 
 ---
 
-## 🚦 How to Use (Simple Example)
+## 🚀 Implemented Features
 
-1. **Configure your `.env` and `config/filesystems.php`** (see below for details)
-2. **Store and retrieve a file:**
+- **Artisan Commands:**
+  - `oci:setup` – Create Oracle-compatible `.oci` folder, generate/copy key files, write config
+  - `oci:config` – Interactive configuration for OCI settings, with `--validate` to check config
+  - `oci:connection` – Manage multiple OCI connections: `list`, `test`, `switch`, `summary`
+  - `oci:status` – Check connection status, test file operations, and list files in a bucket
+
+- **Key Providers:**
+  - File-based (from file path)
+  - Environment-based (from env variable, supports base64)
+  - Custom providers via interface
+
+- **Enums:**
+  - `ConnectionType` (primary, secondary, backup, development, testing, staging, production, archive)
+  - `StorageTier` (Standard, InfrequentAccess, Archive)
+  - `LogLevel` (emergency, alert, critical, error, warning, notice, info, debug)
+
+- **Exception Handling:**
+  - `PrivateKeyFileNotFoundException`
+  - `SignerValidateException`
+  - `SigningValidationFailedException`
+
+- **Configuration:**
+  - All required OCI config: tenancy, user, fingerprint, key path, region, namespace, bucket, storage tier
+  - Optional: prefix, url, passphrase, advanced performance/cache options, debug/logging
+
+- **Integration:**
+  - Laravel filesystem disk driver (`oci`)
+  - Event system for file operations (upload, download, delete, etc.)
+  - Service provider auto-registers everything
+  - Health check and connection validation built-in
+
+---
+
+## ⚡ Quick Start
 
 ```php
 use Illuminate\Support\Facades\Storage;
 
-// Store a file
-Storage::disk('oci')->put('example.txt', 'Hello Oracle Cloud!');
+// Upload a file
+Storage::disk('oci')->put('documents/hello.txt', 'Hello, Oracle Cloud!');
 
-// Retrieve a file
-$content = Storage::disk('oci')->get('example.txt');
-echo $content; // Outputs: Hello Oracle Cloud!
+// Download a file
+$content = Storage::disk('oci')->get('documents/hello.txt');
+
+// List files
+$files = Storage::disk('oci')->files('documents');
 ```
 
 ---
 
-## 📋 Table of Contents
+## 📚 Documentation
 
-- [Features](#features)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Authentication](#authentication)
-- [Usage](#usage)
-- [API Reference](#api-reference)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [Support](#support)
+- [Configuration Guide](docs/CONFIGURATION.md) — All config options, environment variables, and best practices
+- [Authentication Setup](docs/AUTHENTICATION.md) — Key management, provider types, and security notes
+- [Usage Examples](docs/EXAMPLES.md) — Real-world code snippets for common tasks
+- [Testing Guide](docs/TESTING.md) — How to test, recommended tools, and sample tests
+- [Performance Guide](docs/PERFORMANCE.md) — Tuning, caching, and large file strategies
+- [Security Guide](docs/SECURITY.md) — Best practices, secrets management, and compliance
+- [Advanced Features](docs/ADVANCED.md) — Bulk ops, events, custom providers, and more
+- [Migration Guide](docs/MIGRATION.md) — Migrate from S3, GCS, or local storage
+- [Deployment Guide](docs/DEPLOYMENT.md) — Production deployment strategies
+- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) — Common issues and solutions
+- [API Reference](docs/API_REFERENCE.md) — Full method signatures and options
 
-## ✨ Features
+---
 
-- Full Laravel Filesystem integration for Oracle Cloud Infrastructure (OCI) Object Storage
-- Read, write, delete, copy, move, and check existence of files
-- Directory operations (list, create, delete)
-- Temporary URLs for secure, time-limited file access
-- Multiple authentication methods (file-based, environment-based)
-- Storage tier support (Standard, Infrequent Access, Archive)
-- Bulk operations (delete, copy)
-- Advanced configuration options (timeouts, SSL, chunk size, etc.)
-- Comprehensive logging and error handling
-- CLI commands for setup, configuration, and validation
-- Tested with PHP 8.2+ and Laravel 11+
+## 📝 API Reference
 
-## 📋 Requirements
+See the [API_REFERENCE.md](docs/API_REFERENCE.md) for full method signatures, options, and advanced usage. For configuration, authentication, and advanced features, see the relevant guides above.
 
-| Component    | Version | Notes                                   |
-| ------------ | ------- | --------------------------------------- |
-| **PHP**      | 8.2+    | Required for modern language features   |
-| **Laravel**  | 11.0+   | Filesystem abstraction compatibility    |
-| **OpenSSL**  | Latest  | Required for API key generation and SSL |
-| **cURL**     | Latest  | HTTP client operations                  |
-| **ext-json** | *       | JSON parsing for API responses          |
-
-### Optional Extensions
-
-- **ext-mbstring** - Enhanced string handling
-- **ext-fileinfo** - Improved MIME type detection
-- **ext-intl** - Internationalization support
-
-## 🚀 Installation
-
-```bash
-composer require mohamedhabibwork/laravel-oci-driver
-```
-
-Optionally, publish the configuration:
-
-```bash
-php artisan vendor:publish --tag="oci-config"
-```
-
-Run the setup command:
-
-```bash
-php artisan oci:setup --generate-keys
-```
-
-## ⚙️ Configuration
-
-Add to your `config/filesystems.php`:
-
-```php
-'oci' => [
-    'driver' => 'oci',
-    'key_provider' => 'file', // 'file' or 'environment'
-    'tenancy_ocid' => env('OCI_TENANCY_OCID'),
-    'user_ocid' => env('OCI_USER_OCID'),
-    'fingerprint' => env('OCI_FINGERPRINT'),
-    'private_key_path' => env('OCI_PRIVATE_KEY_PATH'),
-    'passphrase' => env('OCI_PASSPHRASE'),
-    'region' => env('OCI_REGION', 'us-phoenix-1'),
-    'namespace' => env('OCI_NAMESPACE'),
-    'bucket' => env('OCI_BUCKET'),
-    'prefix' => env('OCI_PREFIX', ''),
-    'url' => env('OCI_URL'),
-    'visibility' => 'private',
-    'storage_tier' => 'Standard',
-    'options' => [
-        'timeout' => 30,
-        'connect_timeout' => 10,
-        'retry_max' => 3,
-        'retry_delay' => 1000,
-        'verify_ssl' => true,
-        'chunk_size' => 8388608, // 8MB
-    ],
-],
-```
-
-Add to your `.env` file:
-
-```env
-OCI_TENANCY_OCID=ocid1.tenancy.oc1..aaaaaaaexample
-OCI_USER_OCID=ocid1.user.oc1..aaaaaaaexample
-OCI_FINGERPRINT=aa:bb:cc:dd:ee:ff:gg:hh:ii:jj:kk:ll:mm:nn:oo:pp
-OCI_PRIVATE_KEY_PATH=.oci/oci_api_key.pem
-OCI_PASSPHRASE=your_passphrase_if_encrypted
-OCI_REGION=us-phoenix-1
-OCI_NAMESPACE=your_namespace
-OCI_BUCKET=your_bucket_name
-OCI_PREFIX=app/files/
-OCI_URL=https://objectstorage.us-phoenix-1.oraclecloud.com
-OCI_STORAGE_TIER=Standard
-```
-
-## 🔐 Authentication
-
-- File-based: store your private key in a file and reference it in the config
-- Environment-based: store your private key in an environment variable
-
-## 📖 Usage
-
-### Basic File Operations
-
-```php
-use Illuminate\Support\Facades\Storage;
-
-$oci = Storage::disk('oci');
-
-// File upload
-$oci->put('documents/report.pdf', $pdfContent);
-
-// File download
-$content = $oci->get('documents/report.pdf');
-
-// File information
-$exists = $oci->exists('documents/report.pdf');
-$size = $oci->size('documents/report.pdf');
-$lastModified = $oci->lastModified('documents/report.pdf');
-$mimeType = $oci->mimeType('documents/report.pdf');
-
-// File operations
-$oci->copy('source.txt', 'destination.txt');
-$oci->move('old-location.txt', 'new-location.txt');
-$oci->delete('unwanted-file.txt');
-
-// Directory operations
-$files = $oci->files('documents/');
-$allFiles = $oci->allFiles('documents/');
-$directories = $oci->directories('uploads/');
-$oci->makeDirectory('new-folder');
-$oci->deleteDirectory('old-folder');
-```
-
-### Temporary URLs
-
-```php
-// Generate temporary URL (1 hour expiration)
-$url = $oci->temporaryUrl('private-document.pdf', now()->addHour());
-```
-
-### Bulk Operations
-
-```php
-// Bulk delete
-$oci->delete([
-    'file1.txt',
-    'file2.txt',
-    'documents/file3.pdf'
-]);
-```
-
-### Multiple Connections
-
-```php
-$staging = Storage::disk('oci-staging');
-$production = Storage::disk('oci-prod');
-```
-
-### Storage Tiers
-
-```php
-use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
-
-$oci->put('backup/data.json', $data, [
-    'storage_tier' => StorageTier::ARCHIVE
-]);
-```
-
-## 📚 API Reference
-
-See the [API_REFERENCE.md](docs/API_REFERENCE.md) for full method signatures and options.
+---
 
 ## 🧪 Testing
 
 ```bash
 composer test
 ```
+
+See the [Testing Guide](docs/TESTING.md) for more details and examples.
+
+---
 
 ## 🔧 Troubleshooting
 
@@ -234,9 +111,13 @@ composer test
 - Check file permissions for private keys
 - See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for more help
 
+---
+
 ## 🤝 Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+---
 
 ## 📞 Support
 
@@ -244,9 +125,28 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - [GitHub Discussions](https://github.com/mohamedhabibwork/laravel-oci-driver/discussions)
 - Email: [security@mohamedhabib.work](mailto:security@mohamedhabib.work)
 
+---
+
 ## 📄 License
 
 The MIT License (MIT). See [LICENSE.md](LICENSE.md) for details.
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Advanced Health Checks (Spatie Health integration)
+- [ ] Connection Pooling and advanced parallel/multipart upload support
+- [ ] Custom Event Listeners for all storage operations
+- [ ] Improved Error Reporting and user-friendly CLI output
+- [ ] Web UI for Connection Management
+- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
+- [ ] Automatic Key Rotation
+- [ ] Enhanced Documentation & Examples
+- [ ] Support for Additional OCI Services (beyond Object Storage)
+- [ ] Performance Benchmarks and Tuning Guides
+
+---
 
 ## 👥 Credits
 

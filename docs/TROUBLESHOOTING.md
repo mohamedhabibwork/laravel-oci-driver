@@ -1,5 +1,7 @@
 # Troubleshooting Guide
 
+> **Note:** For a summary of currently implemented features and the project roadmap, see the [README](../README.md).
+
 Comprehensive troubleshooting guide for the Laravel OCI Driver package.
 
 ## Table of Contents
@@ -775,3 +777,18 @@ Error logs and stack traces
 ---
 
 **Need more help?** Check the [API Reference](API_REFERENCE.md) for detailed method documentation or the main [README](../README.md) for usage examples.
+
+## 🗺️ Roadmap
+
+See the [README](../README.md) for the most up-to-date roadmap and planned features.
+
+- [ ] Advanced Health Checks (Spatie Health integration)
+- [ ] Connection Pooling and advanced parallel/multipart upload support
+- [ ] Custom Event Listeners for all storage operations
+- [ ] Improved Error Reporting and user-friendly CLI output
+- [ ] Web UI for Connection Management
+- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
+- [ ] Automatic Key Rotation
+- [ ] Enhanced Documentation & Examples
+- [ ] Support for Additional OCI Services (beyond Object Storage)
+- [ ] Performance Benchmarks and Tuning Guides

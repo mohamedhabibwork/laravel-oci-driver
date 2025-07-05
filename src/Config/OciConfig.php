@@ -31,7 +31,7 @@ final readonly class OciConfig
      */
     public static function fromConnection(string $connection = 'default'): static
     {
-        $config = config("laravel-oci-driver.connections.{$connection}", []);
+        $config = config("filesystems.disks.{$connection}", config("laravel-oci-driver.connections.{$connection}", []));
 
         if (empty($config)) {
             throw new \InvalidArgumentException("OCI connection '{$connection}' not found in configuration");

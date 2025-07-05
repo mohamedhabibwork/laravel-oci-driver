@@ -41,115 +41,32 @@ return [
 
     'connections' => [
         'default' => [
-            /*
-            |--------------------------------------------------------------------------
-            | Connection Type
-            |--------------------------------------------------------------------------
-            |
-            | Specify the type of this connection. This helps with organization
-            | and automatic configuration selection. Available types:
-            | primary, secondary, backup, development, testing, staging, production, archive
-            |
-            */
-            'connection_type' => env('OCI_CONNECTION_TYPE', 'primary'),
-            /*
-            |--------------------------------------------------------------------------
-            | OCI Authentication Configuration
-            |--------------------------------------------------------------------------
-            |
-            | These settings are required for authenticating with Oracle Cloud
-            | Infrastructure. You can obtain these values from your OCI console.
-            |
-            */
-
             'tenancy_id' => env('OCI_TENANCY_ID'),
             'user_id' => env('OCI_USER_ID'),
             'key_fingerprint' => env('OCI_KEY_FINGERPRINT'),
             'key_path' => env('OCI_KEY_PATH'),
-
-            /*
-            |--------------------------------------------------------------------------
-            | OCI Object Storage Configuration
-            |--------------------------------------------------------------------------
-            |
-            | Configure the object storage settings including namespace, region,
-            | bucket name, and default storage tier.
-            |
-            */
-
             'namespace' => env('OCI_NAMESPACE'),
             'region' => env('OCI_REGION'),
             'bucket' => env('OCI_BUCKET'),
             'storage_tier' => env('OCI_STORAGE_TIER', 'Standard'),
-
-            /*
-            |--------------------------------------------------------------------------
-            | Request Configuration
-            |--------------------------------------------------------------------------
-            |
-            | Configure HTTP request settings for OCI API calls.
-            |
-            */
-
             'timeout' => env('OCI_TIMEOUT', 30),
             'connect_timeout' => env('OCI_CONNECT_TIMEOUT', 10),
             'retry_attempts' => env('OCI_RETRY_ATTEMPTS', 3),
             'retry_delay' => env('OCI_RETRY_DELAY', 1000), // milliseconds
-
-            /*
-            |--------------------------------------------------------------------------
-            | Temporary URL Configuration
-            |--------------------------------------------------------------------------
-            |
-            | Configure default settings for temporary URL generation.
-            |
-            */
-
             'temporary_url' => [
                 'default_expiry' => env('OCI_TEMP_URL_EXPIRY', 3600), // seconds
                 'max_expiry' => env('OCI_TEMP_URL_MAX_EXPIRY', 86400), // 24 hours
             ],
-
-            /*
-            |--------------------------------------------------------------------------
-            | Upload Configuration
-            |--------------------------------------------------------------------------
-            |
-            | Configure default settings for file uploads.
-            |
-            */
-
             'upload' => [
                 'chunk_size' => env('OCI_UPLOAD_CHUNK_SIZE', 8388608), // 8MB
                 'multipart_threshold' => env('OCI_MULTIPART_THRESHOLD', 104857600), // 100MB
                 'enable_checksum' => env('OCI_ENABLE_CHECKSUM', true),
             ],
-
-            /*
-            |--------------------------------------------------------------------------
-            | Caching Configuration
-            |--------------------------------------------------------------------------
-            |
-            | Configure caching for metadata and object information to improve
-            | performance and reduce API calls.
-            |
-            */
-
             'cache' => [
                 'enabled' => env('OCI_CACHE_ENABLED', true),
                 'ttl' => env('OCI_CACHE_TTL', 300), // 5 minutes
                 'prefix' => env('OCI_CACHE_PREFIX', 'oci_driver'),
             ],
-
-            /*
-            |--------------------------------------------------------------------------
-            | Logging Configuration
-            |--------------------------------------------------------------------------
-            |
-            | Configure logging for OCI operations.
-            |
-            */
-
             'logging' => [
                 'enabled' => env('OCI_LOGGING_ENABLED', false),
                 'level' => env('OCI_LOG_LEVEL', 'info'),
@@ -167,7 +84,6 @@ return [
         |
         */
         'production' => [
-            'connection_type' => 'production',
             'tenancy_id' => env('OCI_PROD_TENANCY_ID'),
             'user_id' => env('OCI_PROD_USER_ID'),
             'key_fingerprint' => env('OCI_PROD_KEY_FINGERPRINT'),
@@ -197,7 +113,6 @@ return [
         |
         */
         'development' => [
-            'connection_type' => 'development',
             'tenancy_id' => env('OCI_DEV_TENANCY_ID'),
             'user_id' => env('OCI_DEV_USER_ID'),
             'key_fingerprint' => env('OCI_DEV_KEY_FINGERPRINT'),
@@ -225,7 +140,6 @@ return [
         |
         */
         'backup' => [
-            'connection_type' => 'backup',
             'tenancy_id' => env('OCI_BACKUP_TENANCY_ID'),
             'user_id' => env('OCI_BACKUP_USER_ID'),
             'key_fingerprint' => env('OCI_BACKUP_KEY_FINGERPRINT'),
