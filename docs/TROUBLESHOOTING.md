@@ -778,17 +778,134 @@ Error logs and stack traces
 
 **Need more help?** Check the [API Reference](API_REFERENCE.md) for detailed method documentation or the main [README](../README.md) for usage examples.
 
-## 🗺️ Roadmap
+---
 
-See the [README](../README.md) for the most up-to-date roadmap and planned features.
+## Advanced Troubleshooting
 
-- [ ] Advanced Health Checks (Spatie Health integration)
-- [ ] Connection Pooling and advanced parallel/multipart upload support
-- [ ] Custom Event Listeners for all storage operations
-- [ ] Improved Error Reporting and user-friendly CLI output
-- [ ] Web UI for Connection Management
-- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
-- [ ] Automatic Key Rotation
-- [ ] Enhanced Documentation & Examples
-- [ ] Support for Additional OCI Services (beyond Object Storage)
-- [ ] Performance Benchmarks and Tuning Guides
+### Debug Mode
+
+Enable debug mode for detailed logging:
+
+```bash
+# .env
+OCI_DEBUG=true
+OCI_LOG_LEVEL=debug
+```
+
+### Network Diagnostics
+
+```bash
+# Test network connectivity to OCI
+curl -I https://objectstorage.us-phoenix-1.oraclecloud.com
+
+# Check DNS resolution
+nslookup objectstorage.us-phoenix-1.oraclecloud.com
+
+# Test with specific region
+curl -I https://objectstorage.{region}.oraclecloud.com
+```
+
+### Configuration Validation
+
+```bash
+# Validate current configuration
+php artisan oci:config --validate
+
+# Test all connections
+php artisan oci:connection test --all
+
+# Check connection status
+php artisan oci:status --verbose
+```
+
+### Log Analysis
+
+```bash
+# View OCI-specific logs
+tail -f storage/logs/oci.log
+
+# View Laravel logs for OCI errors
+grep -i "oci\|oracle" storage/logs/laravel.log
+
+# View system errors
+sudo tail -f /var/log/nginx/error.log
+sudo tail -f /var/log/php8.2-fpm.log
+```
+
+### Memory and Performance Issues
+
+```bash
+# Check PHP memory usage
+php -d memory_limit=512M artisan oci:status
+
+# Monitor during file operations
+watch -n 1 'ps aux | grep php'
+
+# Check disk space
+df -h
+du -sh storage/
+```
+
+---
+
+## Frequently Asked Questions
+
+### General Questions
+
+**Q: Can I use multiple OCI regions in the same application?**
+A: Yes, configure multiple disk connections with different regions in `config/filesystems.php`.
+
+**Q: Is the private key stored securely?**
+A: The private key file should be stored outside the web root with 600 permissions. The package reads it but never stores or transmits the key content.
+
+**Q: Can I migrate from AWS S3 to OCI?**
+A: Yes, see the [Migration Guide](MIGRATION.md) for detailed instructions.
+
+### Performance Questions
+
+**Q: Why are uploads slow?**
+A: Check your network connection, increase chunk size in configuration, or use multipart uploads for large files.
+
+**Q: How can I optimize for large files?**
+A: Use streaming operations, configure appropriate timeouts, and consider chunked uploads for files over 100MB.
+
+### Security Questions
+
+**Q: How often should I rotate my OCI keys?**
+A: Oracle recommends rotating keys every 90 days. The package supports key rotation through the `oci:config` command.
+
+**Q: Can I use temporary credentials?**
+A: Currently, the package supports user principal authentication with API keys. Instance principal support is planned for future releases.
+
+---
+
+## Getting Additional Help
+
+### Community Support
+
+- **GitHub Discussions**: [Ask questions and share experiences](https://github.com/mohamedhabibwork/laravel-oci-driver/discussions)
+- **Stack Overflow**: Use tag `laravel-oci-driver`
+- **Laravel Community**: General Laravel support channels
+
+### Professional Support
+
+- **Bug Reports**: [GitHub Issues](https://github.com/mohamedhabibwork/laravel-oci-driver/issues)
+- **Commercial Support**: Contact [business@mohamedhabib.work](mailto:business@mohamedhabib.work)
+- **Security Issues**: Report to [security@mohamedhabib.work](mailto:security@mohamedhabib.work)
+
+### Contributing
+
+- **Documentation**: Submit PRs for documentation improvements
+- **Code**: Follow the contributing guidelines in [CONTRIBUTING.md](../CONTRIBUTING.md)
+- **Testing**: Help expand test coverage
+
+---
+
+## References
+
+- [Configuration Guide](CONFIGURATION.md) - Complete configuration reference
+- [Installation Guide](INSTALLATION.md) - Installation and setup
+- [API Reference](API_REFERENCE.md) - Method documentation
+- [Usage Examples](EXAMPLES.md) - Practical examples
+- [Security Guide](SECURITY.md) - Security best practices
+- [Performance Guide](PERFORMANCE.md) - Optimization techniques
