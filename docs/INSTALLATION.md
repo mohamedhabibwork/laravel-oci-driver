@@ -551,17 +551,219 @@ If you encounter issues not covered here:
 
 **Next Steps**: After successful installation, see the [Configuration Guide](CONFIGURATION.md) for detailed setup instructions.
 
-## 🗺️ Roadmap
+---
 
-See the [README](../README.md) for the most up-to-date roadmap and planned features.
+## Troubleshooting Installation Issues
 
-- [ ] Advanced Health Checks (Spatie Health integration)
-- [ ] Connection Pooling and advanced parallel/multipart upload support
-- [ ] Custom Event Listeners for all storage operations
-- [ ] Improved Error Reporting and user-friendly CLI output
-- [ ] Web UI for Connection Management
-- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
-- [ ] Automatic Key Rotation
-- [ ] Enhanced Documentation & Examples
-- [ ] Support for Additional OCI Services (beyond Object Storage)
-- [ ] Performance Benchmarks and Tuning Guides
+### Common Issues
+
+#### Composer Installation Problems
+
+```bash
+# Clear Composer cache
+composer clear-cache
+
+# Install with verbose output
+composer require mohamedhabibwork/laravel-oci-driver -vvv
+
+# Force update if package is cached
+composer update mohamedhabibwork/laravel-oci-driver --prefer-dist
+```
+
+#### Service Provider Registration Issues
+
+If the service provider is not auto-registered:
+
+```php
+// config/app.php
+'providers' => [
+    // ...
+    LaravelOCI\LaravelOciDriver\LaravelOciDriverServiceProvider::class,
+],
+```
+
+#### Artisan Command Not Found
+
+```bash
+# Clear configuration cache
+php artisan config:clear
+
+# Re-cache configuration
+php artisan config:cache
+
+# List available commands to verify
+php artisan list oci
+```
+
+#### Permission Issues
+
+```bash
+# Set correct permissions for storage directory
+chmod -R 755 storage/
+chown -R www-data:www-data storage/
+
+# Set correct permissions for OCI key file
+chmod 600 /path/to/private-key.pem
+chown www-data:www-data /path/to/private-key.pem
+```
+
+### Environment-Specific Issues
+
+#### Docker Installation
+
+When installing in Docker containers:
+
+```dockerfile
+# Dockerfile
+FROM php:8.2-fpm
+
+# Install required extensions
+RUN docker-php-ext-install curl openssl
+
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
+# Copy and install dependencies
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --optimize-autoloader
+
+# Copy application
+COPY . .
+
+# Set permissions
+RUN chmod -R 755 storage bootstrap/cache
+RUN chown -R www-data:www-data storage bootstrap/cache
+```
+
+#### Laravel Sail
+
+```bash
+# Install in Sail environment
+./vendor/bin/sail composer require mohamedhabibwork/laravel-oci-driver
+
+# Run setup inside container
+./vendor/bin/sail artisan oci:setup
+```
+
+#### Shared Hosting
+
+For shared hosting environments:
+
+1. Ensure PHP 8.2+ is available
+2. Install via Composer (may need to run locally and upload vendor/)
+3. Store private keys outside public_html
+4. Use relative paths for key_path configuration
+
+### Version Compatibility
+
+#### Laravel Version Matrix
+
+| Laravel Version | Package Version | PHP Version | Status |
+|----------------|----------------|-------------|---------|
+| 11.x | Latest | 8.2+ | ✅ Fully Supported |
+| 10.x | Latest | 8.1+ | ✅ Fully Supported |
+| 9.x | v1.x | 8.0+ | ⚠️ Legacy Support |
+
+#### Upgrading Between Versions
+
+```bash
+# Backup current configuration
+cp config/filesystems.php config/filesystems.php.backup
+
+# Update package
+composer update mohamedhabibwork/laravel-oci-driver
+
+# Check for configuration changes
+php artisan oci:config --validate
+
+# Test functionality
+php artisan oci:status
+```
+
+---
+
+## Performance Considerations
+
+### Production Optimization
+
+```bash
+# Optimize Composer autoloader
+composer install --optimize-autoloader --no-dev
+
+# Cache Laravel configurations
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+
+# Enable OPcache in production
+echo "opcache.enable=1" >> /etc/php/8.2/fpm/php.ini
+echo "opcache.memory_consumption=256" >> /etc/php/8.2/fpm/php.ini
+```
+
+### Memory Configuration
+
+For handling large files, adjust PHP memory settings:
+
+```ini
+; php.ini
+memory_limit = 512M
+upload_max_filesize = 500M
+post_max_size = 500M
+max_execution_time = 300
+```
+
+---
+
+## Security Considerations
+
+### Post-Installation Security
+
+```bash
+# Secure private key file
+chmod 600 /path/to/private-key.pem
+
+# Remove sensitive files from version control
+echo "/.oci/" >> .gitignore
+echo "storage/oci/" >> .gitignore
+
+# Verify no sensitive data in repository
+git log --all --full-history -- "*.pem" "*.key"
+```
+
+### Environment Variables
+
+Ensure sensitive configuration is in environment variables:
+
+```bash
+# .env
+OCI_TENANCY_OCID=ocid1.tenancy.oc1..abcd...
+OCI_USER_OCID=ocid1.user.oc1..efgh...
+OCI_FINGERPRINT=aa:bb:cc:dd:ee:ff:...
+OCI_PRIVATE_KEY_PATH=/secure/path/private-key.pem
+```
+
+---
+
+## Verification Checklist
+
+After installation, verify everything is working:
+
+- [ ] Package installed via Composer
+- [ ] Service provider registered
+- [ ] Artisan commands available (`php artisan list oci`)
+- [ ] Configuration file published
+- [ ] Environment variables set
+- [ ] Private key accessible with correct permissions
+- [ ] Connection test passes (`php artisan oci:status`)
+- [ ] Basic file operations work
+- [ ] Error handling configured
+
+---
+
+## References
+
+- [Configuration Guide](CONFIGURATION.md) - Complete setup instructions
+- [Authentication Setup](AUTHENTICATION.md) - OCI authentication configuration
+- [Troubleshooting Guide](TROUBLESHOOTING.md) - Common issues and solutions
+- [Usage Examples](EXAMPLES.md) - Practical implementation examples
+- [API Reference](API_REFERENCE.md) - Complete API documentation
