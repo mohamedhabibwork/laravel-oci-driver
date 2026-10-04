@@ -78,7 +78,11 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
      */
     protected function registerOciDriver(): void
     {
-        Storage::extend('oci', function ($app, $config) {
+        // Laravel rebinds this callback to the filesystem manager.
+        $configureTemporaryUrls = $this->configureTemporaryUrls(...);
+        $sanitizeConfigForLogging = $this->sanitizeConfigForLogging(...);
+
+        Storage::extend('oci', function ($app, $config) use ($configureTemporaryUrls, $sanitizeConfigForLogging) {
             // Validate configuration before creating client
             $ociConfig = OciConfig::fromDisk($config['driver'] ?? 'oci', $config['connection'] ?? 'default');
             try {
@@ -94,7 +98,7 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
                 );
 
                 // Configure temporary URL generation
-                $this->configureTemporaryUrls($filesystemAdapter, $config);
+                $configureTemporaryUrls($filesystemAdapter, $config);
 
                 return $filesystemAdapter;
             } catch (\Exception $e) {
@@ -102,7 +106,7 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
                 if ($app->bound('log')) {
                     $app['log']->error('Failed to create OCI storage driver', [
                         'error' => $e->getMessage(),
-                        'config' => $this->sanitizeConfigForLogging($config),
+                        'config' => $sanitizeConfigForLogging($config),
                     ]);
                 }
 
