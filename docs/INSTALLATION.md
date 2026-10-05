@@ -660,9 +660,7 @@ For shared hosting environments:
 
 | Laravel Version | Package Version | PHP Version | Status |
 |----------------|----------------|-------------|---------|
-| 11.x | Latest | 8.2+ | ✅ Fully Supported |
-| 10.x | Latest | 8.1+ | ✅ Fully Supported |
-| 9.x | v1.x | 8.0+ | ⚠️ Legacy Support |
+| 10.x–12.x | Latest | 8.2+ | ✅ Fully Supported |
 
 #### Upgrading Between Versions
 

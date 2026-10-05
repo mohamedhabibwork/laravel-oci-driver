@@ -811,8 +811,8 @@ curl -I https://objectstorage.{region}.oraclecloud.com
 # Validate current configuration
 php artisan oci:config --validate
 
-# Test all connections
-php artisan oci:connection test --all
+# Test all connections (omit the optional connection name)
+php artisan oci:connection test
 
 # Check connection status
 php artisan oci:status --verbose
@@ -872,7 +872,7 @@ A: Use streaming operations, configure appropriate timeouts, and consider chunke
 ### Security Questions
 
 **Q: How often should I rotate my OCI keys?**
-A: Oracle recommends rotating keys every 90 days. The package supports key rotation through the `oci:config` command.
+A: Follow your organization's rotation policy and Oracle Cloud guidance. The package does not rotate keys: create and register a replacement API signing key in OCI, update the application's private-key path and fingerprint, validate the configuration, and revoke the old key after confirming the new key works.
 
 **Q: Can I use temporary credentials?**
 A: Currently, the package supports user principal authentication with API keys. Instance principal support is planned for future releases.

@@ -943,9 +943,9 @@ For more examples and detailed usage instructions, see the main [README](../READ
 The Laravel OCI Driver throws specific exceptions for different error conditions:
 
 ```php
-use LaravelOCI\LaravelOciDriver\Exceptions\PrivateKeyFileNotFoundException;
-use LaravelOCI\LaravelOciDriver\Exceptions\SignerValidateException;
-use LaravelOCI\LaravelOciDriver\Exceptions\SigningValidationFailedException;
+use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
+use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
+use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
 
 try {
     $result = Storage::disk('oci')->put('file.txt', 'content');
@@ -968,20 +968,14 @@ try {
 
 ```php
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Retry;
+use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
 
-// Retry failed operations with exponential backoff
-$result = Retry::times(3)
-    ->sleep(1000)
-    ->exponentialBackoff()
-    ->when(function ($exception) {
-        // Retry on network errors but not on authentication errors
-        return !($exception instanceof SignerValidateException);
-    })
-    ->throw()
-    ->attempt(function () {
-        return Storage::disk('oci')->put('important-file.txt', $content);
-    });
+// Retry failed operations, but do not retry configuration errors
+$result = retry(3, function () {
+    return Storage::disk('oci')->put('important-file.txt', 'content');
+}, 1000, function ($exception) {
+    return !($exception instanceof SignerValidateException);
+});
 ```
 
 ---

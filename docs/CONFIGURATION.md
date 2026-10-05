@@ -247,36 +247,22 @@ This ensures all file operations for the authenticated user are automatically pr
 ### Performance Tuning
 
 ```php
-'oci' => [
-    'driver' => 'oci',
-    // ... basic config
-    'options' => [
-        // Connection settings
-        'timeout' => 60,                    // Request timeout in seconds
-        'connect_timeout' => 30,            // Connection timeout in seconds
-        'read_timeout' => 300,              // Read timeout for large files
-        'write_timeout' => 300,             // Write timeout for uploads
-        
-        // Retry settings
-        'retry_max' => 5,                   // Maximum retry attempts
-        'retry_delay' => 1000,              // Delay between retries (milliseconds)
-        'retry_exponential' => true,        // Use exponential backoff
-        
-        // Transfer settings
-        'chunk_size' => 8388608,            // 8MB chunks for multipart uploads
-        'multipart_threshold' => 104857600, // 100MB threshold for multipart
-        'max_concurrent_requests' => 10,    // Maximum concurrent requests
-        
-        // Caching
-        'cache_metadata' => true,           // Cache file metadata
-        'cache_ttl' => 3600,               // Cache TTL in seconds
-        'cache_prefix' => 'oci_metadata',   // Cache key prefix
-        
-        // SSL settings
-        'verify_ssl' => true,               // Verify SSL certificates
-        'ssl_cert' => null,                 // Custom SSL certificate path
-        'ssl_key' => null,                  // Custom SSL key path
-        'ssl_ca' => null,                   // Custom CA bundle path
+'connections' => [
+    'default' => [
+        // These connection-level settings are read by the driver.
+        'timeout' => 60,
+        'connect_timeout' => 30,
+        'retry_attempts' => 5,
+        'retry_delay' => 1000, // milliseconds
+        'upload' => [
+            'chunk_size' => 8388608, // 8 MB
+            'multipart_threshold' => 104857600, // 100 MB
+        ],
+        'cache' => [
+            'enabled' => true,
+            'ttl' => 3600, // seconds
+            'prefix' => 'oci_metadata',
+        ],
     ],
 ],
 ```
@@ -349,22 +335,24 @@ This ensures all file operations for the authenticated user are automatically pr
 ],
 ```
 
-### Using Connection Manager
+### Using Multiple Connections
 
 ```php
-use LaravelOCI\LaravelOciDriver\OciConnectionManager;
+use LaravelOCI\LaravelOciDriver\Config\OciConfig;
+use LaravelOCI\LaravelOciDriver\LaravelOciDriver;
 
-// Get connection manager
-$manager = app(OciConnectionManager::class);
+// List configured connection names
+$connections = OciConfig::getAvailableConnections();
 
-// Test all connections
-$results = $manager->testAllConnections();
+// Test every configured connection
+$results = LaravelOciDriver::testMultipleConnections($connections);
 
-// Get specific connection
-$primaryConfig = $manager->getConnection('oci_primary');
+// Read and validate a named connection
+$config = OciConfig::fromConnection('production');
+$errors = $config->validate();
 
-// Switch default connection
-$manager->setDefaultConnection('oci_backup');
+// Use a named connection
+$storage = LaravelOciDriver::connection('backup');
 ```
 
 ---
@@ -482,18 +470,12 @@ php artisan oci:setup
 ### Programmatic Validation
 
 ```php
-use LaravelOCI\LaravelOciDriver\Services\ConfigValidationService;
+use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 
-$validator = app(ConfigValidationService::class);
+$errors = OciConfig::fromConnection('default')->validate();
 
-// Validate all configurations
-$results = $validator->validateAllConfigurations();
-
-// Validate specific configuration
-$result = $validator->validateConfiguration('oci');
-
-if (!$result->isValid()) {
-    foreach ($result->getErrors() as $error) {
+if ($errors !== []) {
+    foreach ($errors as $error) {
         Log::error('OCI Configuration Error: ' . $error);
     }
 }
