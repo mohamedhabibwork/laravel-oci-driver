@@ -19,7 +19,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 )]
 final class OciConfigCommand extends Command
 {
-    public $signature = 'oci:config {--validate : Validate existing configuration}';
+    public $signature = 'oci:config {--validate : Validate existing configuration} {--disk=oci : Disk to validate}';
 
     public $description = 'Configure Oracle Cloud Infrastructure storage settings';
 
@@ -201,9 +201,20 @@ final class OciConfigCommand extends Command
     {
         $this->info('🔍 Validating OCI Configuration');
 
+        $diskOption = $this->option('disk');
+        $disk = is_string($diskOption) && $diskOption !== '' ? $diskOption : 'oci';
+        $diskConfig = config("filesystems.disks.{$disk}");
+
+        if (! is_array($diskConfig) || ($diskConfig['driver'] ?? null) !== 'oci') {
+            $this->error("OCI disk '{$disk}' not found or not configured with the oci driver.");
+            $this->newLine();
+            $this->info('💡 Run "php artisan oci:setup" to create the initial configuration.');
+
+            return self::FAILURE;
+        }
+
         try {
-            // Try to create OciConfig from disk configuration
-            $ociConfig = OciConfig::fromDisk('oci');
+            $ociConfig = OciConfig::fromDiskConfig($diskConfig, $disk);
             $errors = $ociConfig->validate();
 
             if (empty($errors)) {
@@ -221,7 +232,7 @@ final class OciConfigCommand extends Command
                 return self::SUCCESS;
             } else {
                 $this->newLine();
-                $this->error('Configuration Errors:');
+                $this->error("Configuration errors for disk '{$disk}':");
                 foreach ($errors as $error) {
                     $this->line("❌ {$error}");
                 }

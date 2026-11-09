@@ -3,25 +3,41 @@
 namespace LaravelOCI\LaravelOciDriver;
 
 use Carbon\Carbon;
-use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Pool;
 use GuzzleHttp\Psr7\Request;
-use GuzzleHttp\RequestOptions;
-use Illuminate\Support\Facades\Log;
 use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
+use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
 use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
 use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
+use LaravelOCI\LaravelOciDriver\Support\HttpClientFactory;
+use LaravelOCI\LaravelOciDriver\Support\ObjectNameEncoder;
+use LaravelOCI\LaravelOciDriver\Support\ResponseGuard;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\StreamInterface;
 use Ramsey\Uuid\Uuid;
 
 final readonly class OciClient
 {
+    /** Name prefix of PARs created by this package (used by the prune command). */
+    public const PAR_NAME_PREFIX = 'laravel-oci-';
+
+    /** Object fields requested on listings. */
+    public const LIST_FIELDS = 'name,size,etag,timeCreated,timeModified,md5,storageTier';
+
     /**
      * OCI client configuration.
+     *
+     * @param  array<string, mixed>  $config
      */
     private function __construct(
         private array $config,
+        private ClientInterface $http,
+        private Signer $signer,
     ) {}
 
     /**
@@ -29,46 +45,51 @@ final readonly class OciClient
      *
      * @param  array<string, mixed>|OciConfig  $config
      */
-    public static function createWithConfiguration(array|OciConfig $config): self
+    public static function createWithConfiguration(array|OciConfig $config, ?ClientInterface $http = null): self
     {
         if ($config instanceof OciConfig) {
             $configArray = $config->toArray();
         } else {
             $configArray = $config;
         }
-        $instance = new self($configArray);
-        $instance->validateConfiguration();
+        self::validateConfiguration($configArray);
 
-        return $instance;
+        return new self(
+            $configArray,
+            $http ?? HttpClientFactory::make($configArray),
+            Signer::fromConfig($configArray),
+        );
     }
 
     /**
      * Create a new instance from an OciConfig instance directly.
      */
-    public static function fromOciConfig(OciConfig $ociConfig): self
+    public static function fromOciConfig(OciConfig $ociConfig, ?ClientInterface $http = null): self
     {
-        return self::createWithConfiguration($ociConfig);
+        return self::createWithConfiguration($ociConfig, $http);
     }
 
     /**
      * Validate the configuration array.
      *
+     * @param  array<string, mixed>  $config
+     *
      * @throws \InvalidArgumentException When configuration is invalid
      */
-    private function validateConfiguration(): void
+    private static function validateConfiguration(array $config): void
     {
-        $requiredKeys = [
-            'namespace',
-            'region',
-            'bucket',
-            'tenancy_id',
-            'user_id',
-            'storage_tier',
-            'key_fingerprint',
-            'key_path',
-        ];
+        $missingKeys = array_values(array_filter(
+            ['namespace', 'region', 'bucket', 'tenancy_id', 'user_id', 'key_fingerprint'],
+            static fn (string $key): bool => ! isset($config[$key]) || $config[$key] === '',
+        ));
 
-        $missingKeys = array_diff($requiredKeys, array_keys($this->config));
+        $hasKey = false;
+        foreach (['private_key', 'private_key_base64', 'key_path'] as $key) {
+            $hasKey = $hasKey || (isset($config[$key]) && $config[$key] !== '');
+        }
+        if (! $hasKey) {
+            $missingKeys[] = 'private_key|private_key_base64|key_path';
+        }
 
         if (! empty($missingKeys)) {
             throw new \InvalidArgumentException(
@@ -99,7 +120,10 @@ final readonly class OciClient
     }
 
     /**
-     * Send a request to the OCI API.
+     * Send a signed request to the OCI API.
+     *
+     * @param  array<string, string>  $header
+     * @param  array<string, mixed>  $options  Extra Guzzle request options (e.g. ['stream' => true])
      *
      * @throws GuzzleException
      */
@@ -107,18 +131,30 @@ final readonly class OciClient
         string $uri,
         string $method,
         array $header = [],
-        ?string $body = null,
-        ?string $contentType = 'application/json'
-    ) {
-        $authorizationHeaders = $this->getAuthorizationHeaders($uri, $method, $body, $contentType);
+        StreamInterface|string|null $body = null,
+        ?string $contentType = 'application/json',
+        array $options = []
+    ): ResponseInterface {
+        $excludeBodyHeaders = false;
+        if ($body instanceof StreamInterface) {
+            if (strtoupper($method) === 'PUT') {
+                $signedBody = null;
+                $excludeBodyHeaders = true;
+            } else {
+                $signedBody = (string) $body;
+                if ($body->isSeekable()) {
+                    $body->rewind();
+                }
+            }
+        } else {
+            $signedBody = $body;
+        }
 
-        $client = new Client([
-            RequestOptions::ALLOW_REDIRECTS => false,
-        ]);
+        $authorizationHeaders = $this->getAuthorizationHeaders($uri, $method, $signedBody, $contentType, $excludeBodyHeaders);
 
         $request = new Request($method, $uri, array_merge($header, $authorizationHeaders), $body);
 
-        return $client->send($request);
+        return $this->http->send($request, $options);
     }
 
     /**
@@ -127,26 +163,49 @@ final readonly class OciClient
     private function applyPathPrefix(string $path): string
     {
         $prefix = $this->getPrefix();
-
-        // Normalize the path by removing leading slashes
         $path = ltrim($path, '/');
 
-        // check if already starts with prefix
-        if (str_starts_with($path, $prefix)) {
+        if ($prefix === '' || $path === $prefix || str_starts_with($path, $prefix.'/')) {
             return $path;
         }
 
-        // If no prefix is configured, return the normalized path
+        // An empty path addresses the prefix itself.
+        return $path === '' ? $prefix : $prefix.'/'.$path;
+    }
+
+    /**
+     * Object name of a path as the adapter stores it: the configured prefix is always applied,
+     * even when the path happens to start with the prefix text.
+     *
+     * Unlike getPrefixedPath() this is not idempotent; pass its result (already prefixed) to the
+     * idempotent client helpers (bulkDelete, renameObjectBody, ...) and they leave it unchanged.
+     */
+    public function prefixObjectName(string $path): string
+    {
+        $prefix = $this->getPrefix();
+        $path = ltrim($path, '/');
+
         if ($prefix === '') {
             return $path;
         }
 
-        // If path is empty after normalization, return just the prefix
-        if ($path === '') {
-            return $prefix;
-        }
+        return $path === '' ? $prefix : $prefix.'/'.$path;
+    }
 
-        return $prefix . '/' . $path;
+    /**
+     * Build the object URI for an already-prefixed object name.
+     */
+    public function getObjectUri(string $objectName): string
+    {
+        return $this->getBucketUri().'/o/'.ObjectNameEncoder::encode($objectName);
+    }
+
+    /**
+     * Get the public URL of an object.
+     */
+    public function getObjectUrl(string $path): string
+    {
+        return $this->getObjectUri($this->applyPathPrefix($path));
     }
 
     /**
@@ -171,41 +230,73 @@ final readonly class OciClient
     }
 
     /**
-     * Create a temporary URL for a file.
+     * Create a temporary URL (pre-authenticated request) for an object.
+     *
+     * @param  array{access_type?: string}  $options
+     *
+     * @throws \InvalidArgumentException When the expiry is not in the future
+     * @throws OciRequestFailed When OCI rejects the request
      */
-    public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null): string
+    public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null, array $options = []): string
     {
-        $uri = sprintf('%s/p/', $this->getBucketUri());
-        $expiresAt ??= now()->addHour();
+        $now = Carbon::now();
+        $config = $this->getOciConfig();
+        $maxExpiresAt = $now->copy()->addSeconds((int) $config->get('temporary_url.max_expiry', 86400));
 
-        $bodyData = [
-            'accessType' => 'ObjectRead',
-            'name' => Uuid::uuid7()->toString(),
+        $expiresAt ??= $now->copy()->addSeconds((int) $config->get('temporary_url.default_expiry', 3600));
+
+        if ($expiresAt->lessThanOrEqualTo($now)) {
+            throw new \InvalidArgumentException('The temporary URL expiry must be in the future.');
+        }
+
+        if ($expiresAt->greaterThan($maxExpiresAt)) {
+            $expiresAt = $maxExpiresAt;
+        }
+
+        $body = json_encode([
+            'name' => self::PAR_NAME_PREFIX.Uuid::uuid7()->toString(),
             'objectName' => $this->applyPathPrefix($path),
-            'timeExpires' => $expiresAt->toIso8601String(),
-        ];
+            'accessType' => $options['access_type'] ?? 'ObjectRead',
+            'timeExpires' => $expiresAt->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+        ], JSON_THROW_ON_ERROR);
 
-        $body = json_encode($bodyData);
-        if ($body === false) {
-            throw new \RuntimeException('Failed to encode request body to JSON');
-        }
+        $response = ResponseGuard::ok($this->send($this->getBucketUri().'/p/', 'POST', [], $body), 'create temporary URL');
+        $created = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
 
-        try {
-            $response = $this->send($uri, 'POST', [], $body);
+        return $this->getHost().$created['accessUri'];
+    }
 
-            if ($response->getStatusCode() === 200) {
-                $preAuthenticatedRequest = json_decode($response->getBody()->getContents());
+    /**
+     * List one page of pre-authenticated requests on the bucket.
+     *
+     * @return array{items: list<array<string, mixed>>, next: ?string}
+     *
+     * @throws OciRequestFailed
+     */
+    public function listPreAuthenticatedRequests(?string $page = null): array
+    {
+        $uri = $this->getBucketUri().'/p/?limit=1000'.($page !== null ? '&page='.rawurlencode($page) : '');
+        $response = ResponseGuard::ok($this->send($uri, 'GET'), 'list pre-authenticated requests');
+        $items = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $next = $response->getHeaderLine('opc-next-page');
 
-                return $preAuthenticatedRequest->fullPath;
-            }
-        } catch (GuzzleException $exception) {
-            Log::error('Failed to create temporary URL', [
-                'path' => $path,
-                'exception' => $exception->getMessage(),
-            ]);
-        }
+        return ['items' => is_array($items) ? array_values($items) : [], 'next' => $next !== '' ? $next : null];
+    }
 
-        return '';
+    /**
+     * Delete a pre-authenticated request by id.
+     *
+     * @throws OciRequestFailed
+     */
+    public function deletePreAuthenticatedRequest(string $id): void
+    {
+        ResponseGuard::ok(
+            $this->send($this->getBucketUri().'/p/'.rawurlencode($id), 'DELETE'),
+            'delete pre-authenticated request',
+            200,
+            204,
+            404,
+        );
     }
 
     /**
@@ -251,6 +342,8 @@ final readonly class OciClient
     /**
      * Get the authorization headers for a request.
      *
+     * @return array<string, string>
+     *
      * @throws PrivateKeyFileNotFoundException
      * @throws SignerValidateException
      * @throws SigningValidationFailedException
@@ -259,11 +352,11 @@ final readonly class OciClient
         string $uri,
         string $method,
         ?string $body = null,
-        string $contentType = 'application/json'
+        ?string $contentType = 'application/json',
+        bool $excludeBodyHeaders = false
     ): array {
         $headers = [];
-        $signer = new Signer($this->getTenancy(), $this->getUser(), $this->getFingerprint(), $this->getPrivateKey());
-        $strings = $signer->getHeaders($uri, $method, $body, $contentType);
+        $strings = $this->signer->getHeaders($uri, $method, $body, $contentType, null, $excludeBodyHeaders);
 
         foreach ($strings as $item) {
             [$name, $value] = explode(': ', $item, 2);
@@ -274,11 +367,19 @@ final readonly class OciClient
     }
 
     /**
+     * Get the configuration as an OciConfig.
+     */
+    public function getOciConfig(): OciConfig
+    {
+        return new OciConfig($this->config);
+    }
+
+    /**
      * Get the storage tier.
      */
     public function getStorageTier(): StorageTier
     {
-        return StorageTier::fromString($this->config['storage_tier']);
+        return StorageTier::fromString($this->config['storage_tier'] ?? 'Standard');
     }
 
     /**
@@ -298,82 +399,66 @@ final readonly class OciClient
     }
 
     /**
-     * Bulk delete objects from the bucket.
+     * Build a signed DELETE request for an already-prefixed object name.
+     */
+    public function deleteObjectRequest(string $prefixedName): RequestInterface
+    {
+        $uri = $this->getObjectUri($prefixedName);
+
+        return new Request('DELETE', $uri, $this->getAuthorizationHeaders($uri, 'DELETE'));
+    }
+
+    /**
+     * Delete many objects concurrently with native single-object DELETEs.
      *
-     * @link https://docs.oracle.com/en-us/iaas/api/#/en/s3objectstorage/20160918/Object/BulkDelete
+     * A 404 counts as deleted. Paths are run through the configured prefix rule.
+     *
+     * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/DeleteObject
      *
      * @param  array<string>  $paths  List of object paths to delete
-     * @return array{deleted: array<string>, errors: array<array{path: string, error: string}>}
-     *
-     * @throws GuzzleException
+     * @return array{deleted: list<string>, errors: list<array{path: string, error: string}>}
      */
     public function bulkDelete(array $paths): array
     {
-        if (empty($paths)) {
+        $paths = array_values($paths);
+        if ($paths === []) {
             return ['deleted' => [], 'errors' => []];
         }
 
-        $uri = sprintf('%s?delete', $this->getBucketUri());
-
-        $xml = new \SimpleXMLElement('<Delete></Delete>');
-        $xml->addChild('Quiet', 'true');
-
-        foreach ($paths as $path) {
-            $object = $xml->addChild('Object');
-            $object->addChild('Key', $this->applyPathPrefix($path));
-        }
-
-        $body = $xml->asXML();
-        if ($body === false) {
-            throw new \RuntimeException('Failed to generate XML for bulk delete request');
-        }
-
-        try {
-            // Calculate content MD5 as required by S3 API
-            $contentMD5 = base64_encode(md5($body, true));
-
-            $response = $this->send(
-                $uri,
-                'POST',
-                ['Content-MD5' => $contentMD5],
-                $body,
-                'application/xml'
-            );
-
-            if ($response->getStatusCode() === 200) {
-                // Success - all objects deleted
-                return ['deleted' => $paths, 'errors' => []];
+        $requests = function () use ($paths): \Generator {
+            foreach ($paths as $path) {
+                yield $this->deleteObjectRequest($this->applyPathPrefix($path));
             }
+        };
 
-            // Parse response XML for errors
-            $responseBody = $response->getBody()->getContents();
-            $responseXml = simplexml_load_string($responseBody);
+        /** @var array<int, string|null> $failures index => error message, null when deleted */
+        $failures = [];
 
-            $errors = [];
-            $deleted = [];
+        (new Pool($this->http, $requests(), [
+            'concurrency' => max(1, (int) $this->getOciConfig()->get('delete_concurrency', 10)),
+            'fulfilled' => function (ResponseInterface $response, int $index) use (&$failures): void {
+                $status = $response->getStatusCode();
+                $failures[$index] = in_array($status, [200, 204, 404], true)
+                    ? null
+                    : OciRequestFailed::fromResponse($response, 'delete')->getMessage();
+            },
+            'rejected' => function (mixed $reason, int $index) use (&$failures): void {
+                $failures[$index] = $reason instanceof \Throwable ? $reason->getMessage() : 'delete failed';
+            },
+        ]))->promise()->wait();
 
-            if (isset($responseXml->Error)) {
-                foreach ($responseXml->Error as $error) {
-                    $key = (string) $error->Key;
-                    $message = (string) $error->Message;
-                    $errors[] = ['path' => $key, 'error' => $message];
-                }
-
-                // Calculate which paths were successfully deleted
-                $errorPaths = array_column($errors, 'path');
-                $deleted = array_values(array_diff($paths, $errorPaths));
+        $deleted = [];
+        $errors = [];
+        foreach ($paths as $index => $path) {
+            $error = array_key_exists($index, $failures) ? $failures[$index] : 'no response received';
+            if ($error === null) {
+                $deleted[] = $path;
+            } else {
+                $errors[] = ['path' => $path, 'error' => $error];
             }
-
-            return ['deleted' => $deleted, 'errors' => $errors];
-        } catch (GuzzleException $exception) {
-            // If the request totally failed, report all paths as errors
-            $errors = array_map(fn(string $path) => [
-                'path' => $path,
-                'error' => $exception->getMessage(),
-            ], $paths);
-
-            return ['deleted' => [], 'errors' => $errors];
         }
+
+        return ['deleted' => $deleted, 'errors' => $errors];
     }
 
     /**
@@ -383,77 +468,105 @@ final readonly class OciClient
      *
      * @param  string  $sourcePath  Source object path
      * @param  string  $destinationPath  Destination object path
-     * @return bool True if successful, false otherwise
-     *
-     * @throws GuzzleException
+     * @return bool True if successful, false otherwise (including transport errors)
      */
     public function renameObject(string $sourcePath, string $destinationPath): bool
     {
-        $uri = sprintf('%s/actions/renameObject', $this->getBucketUri());
-
-        $bodyData = [
-            'sourceName' => $this->applyPathPrefix($sourcePath),
-            'destinationName' => $this->applyPathPrefix($destinationPath),
-        ];
-
-        $body = json_encode($bodyData);
-        if ($body === false) {
-            throw new \RuntimeException('Failed to encode request body to JSON');
-        }
-
         try {
-            $response = $this->send($uri, 'POST', [], $body);
+            $response = $this->send(
+                $this->renameObjectUri(),
+                'POST',
+                [],
+                $this->renameObjectBody($sourcePath, $destinationPath),
+            );
 
             return $response->getStatusCode() === 200;
-        } catch (GuzzleException $exception) {
-            if ($exception->getCode() === 404) {
-                return false; // Source object not found
-            }
-            throw $exception;
+        } catch (GuzzleException|\JsonException) {
+            return false;
         }
     }
 
     /**
-     * Restore archived objects to a storage tier.
+     * URI of the renameObject action.
+     *
+     * @internal
+     */
+    public function renameObjectUri(): string
+    {
+        return sprintf('%s/actions/renameObject', $this->getBucketUri());
+    }
+
+    /**
+     * JSON body of a renameObject request (names are prefixed idempotently).
+     *
+     * @internal
+     */
+    public function renameObjectBody(string $sourcePath, string $destinationPath): string
+    {
+        return json_encode([
+            'sourceName' => $this->applyPathPrefix($sourcePath),
+            'newName' => $this->applyPathPrefix($destinationPath),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * Restore archived objects, one request per object.
+     *
+     * Stops at the first failed object.
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/RestoreObjects
      *
      * @param  array<string>  $paths  List of object paths to restore
      * @param  int  $hours  Number of hours to make the restored objects available (10-240000 hours)
-     * @return bool True if the restoration request was successful
+     * @return bool True if every restore request was accepted, false otherwise (including transport errors)
      *
-     * @throws GuzzleException
      * @throws \InvalidArgumentException When hours is out of range
      */
     public function restoreObjects(array $paths, int $hours = 24): bool
+    {
+        foreach ($paths as $path) {
+            try {
+                $response = $this->send($this->restoreObjectUri(), 'POST', [], $this->restoreObjectBody($path, $hours));
+            } catch (GuzzleException|\JsonException) {
+                return false;
+            }
+
+            if (! in_array($response->getStatusCode(), [200, 202], true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * URI of the restoreObjects action.
+     *
+     * @internal
+     */
+    public function restoreObjectUri(): string
+    {
+        return sprintf('%s/actions/restoreObjects', $this->getBucketUri());
+    }
+
+    /**
+     * JSON body of a restoreObjects request for one object.
+     *
+     * @internal
+     *
+     * @throws \InvalidArgumentException When hours is out of range
+     * @throws \JsonException
+     */
+    public function restoreObjectBody(string $path, int $hours): string
     {
         if ($hours < 10 || $hours > 240000) {
             throw new \InvalidArgumentException('Hours must be between 10 and 240000');
         }
 
-        if (empty($paths)) {
-            return true; // Nothing to restore
-        }
-
-        $uri = sprintf('%s/actions/restoreObjects', $this->getBucketUri());
-
-        $bodyData = [
-            'objectNames' => array_map(fn($p) => $this->applyPathPrefix($p), $paths),
+        return json_encode([
+            'objectName' => $this->applyPathPrefix($path),
             'hours' => $hours,
-        ];
-
-        $body = json_encode($bodyData);
-        if ($body === false) {
-            throw new \RuntimeException('Failed to encode request body to JSON');
-        }
-
-        try {
-            $response = $this->send($uri, 'POST', [], $body);
-
-            return $response->getStatusCode() === 200;
-        } catch (GuzzleException $exception) {
-            return false;
-        }
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 
     /**
@@ -463,78 +576,99 @@ final readonly class OciClient
      *
      * @param  string  $path  Object path
      * @param  StorageTier  $storageTier  New storage tier
-     * @return bool True if successful, false otherwise
-     *
-     * @throws GuzzleException
+     * @return bool True if successful, false otherwise (including transport errors)
      */
     public function updateObjectStorageTier(string $path, StorageTier $storageTier): bool
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), rawurlencode($this->applyPathPrefix($path)));
-
         try {
             $response = $this->send(
-                $uri,
+                $this->updateStorageTierUri(),
                 'POST',
-                ['Storage-Tier' => $storageTier->value()],
-                null
+                [],
+                $this->updateStorageTierBody($path, $storageTier),
             );
 
             return $response->getStatusCode() === 200;
-        } catch (GuzzleException $exception) {
+        } catch (GuzzleException|\JsonException) {
             return false;
         }
     }
 
     /**
-     * Get detailed information about an object.
+     * URI of the updateObjectStorageTier action.
+     *
+     * @internal
+     */
+    public function updateStorageTierUri(): string
+    {
+        return sprintf('%s/actions/updateObjectStorageTier', $this->getBucketUri());
+    }
+
+    /**
+     * JSON body of an updateObjectStorageTier request.
+     *
+     * @internal
+     *
+     * @throws \JsonException
+     */
+    public function updateStorageTierBody(string $path, StorageTier $storageTier): string
+    {
+        return json_encode([
+            'objectName' => $this->applyPathPrefix($path),
+            'storageTier' => $storageTier->value(),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * Get detailed information about an object (HEAD).
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/HeadObject
      *
      * @param  string  $path  Object path
      * @return array<string, mixed>|null Object metadata or null if not found
      *
+     * @throws OciRequestFailed On any status other than 200 or 404
      * @throws GuzzleException
      */
     public function getObjectInfo(string $path): ?array
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), rawurlencode($this->applyPathPrefix($path)));
+        $response = $this->send($this->getObjectUri($this->applyPathPrefix($path)), 'HEAD');
 
-        try {
-            $response = $this->send($uri, 'HEAD');
-
-            if ($response->getStatusCode() === 200) {
-                $metadata = [];
-                foreach ($response->getHeaders() as $name => $values) {
-                    $metadata[$name] = $values[0];
-                }
-
-                return [
-                    'size' => (int) ($metadata['Content-Length'] ?? 0),
-                    'last_modified' => $metadata['Last-Modified'] ?? null,
-                    'content_type' => $metadata['Content-Type'] ?? null,
-                    'storage_tier' => $metadata['Storage-Tier'] ?? null,
-                    'etag' => $metadata['ETag'] ?? null,
-                    'metadata' => array_filter($metadata, fn($key) => str_starts_with($key, 'x-amz-meta-'), ARRAY_FILTER_USE_KEY),
-                ];
-            }
-
+        if ($response->getStatusCode() === 404) {
             return null;
-        } catch (GuzzleException $exception) {
-            if ($exception->getCode() === 404) {
-                return null; // Object not found
-            }
-            throw $exception;
         }
+
+        ResponseGuard::ok($response, 'head object');
+
+        $metadata = [];
+        foreach ($response->getHeaders() as $name => $values) {
+            if (str_starts_with(strtolower($name), 'opc-meta-')) {
+                $metadata[strtolower($name)] = $values[0];
+            }
+        }
+
+        return [
+            'size' => (int) $response->getHeaderLine('Content-Length'),
+            'last_modified' => $response->getHeaderLine('Last-Modified') ?: null,
+            'content_type' => $response->getHeaderLine('Content-Type') ?: null,
+            'storage_tier' => $response->getHeaderLine('storage-tier') ?: null,
+            'etag' => $response->getHeaderLine('ETag') ?: null,
+            'metadata' => $metadata,
+        ];
     }
 
     /**
      * List objects in the bucket with advanced options.
+     *
+     * Returns the decoded OCI page (`objects`, `prefixes`, `nextStartWith`). The `prefix`
+     * option is run through the configured prefix rule.
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/ListObjects
      *
      * @param  array<string, mixed>  $options  Listing options
      * @return array<string, mixed> List of objects and prefixes
      *
+     * @throws OciRequestFailed
      * @throws GuzzleException
      */
     public function listObjects(array $options = []): array
@@ -551,20 +685,45 @@ final readonly class OciClient
         ]);
 
         if (! empty($queryParams)) {
-            $uri .= '?' . http_build_query($queryParams);
+            $uri .= '?'.http_build_query($queryParams, '', '&', PHP_QUERY_RFC3986);
         }
 
-        try {
-            $response = $this->send($uri, 'GET');
+        $response = ResponseGuard::ok($this->send($uri, 'GET'), 'list');
 
-            if ($response->getStatusCode() === 200) {
-                return json_decode($response->getBody()->getContents(), true) ?: [];
-            }
+        return json_decode((string) $response->getBody(), true) ?: [];
+    }
 
-            return [];
-        } catch (GuzzleException $exception) {
-            return [];
-        }
+    /**
+     * Fetch one page of a listing. The prefix is used as given (already includes any configured prefix).
+     *
+     * @return array{objects: list<array<string, mixed>>, prefixes: list<string>, nextStartWith: ?string}
+     *
+     * @throws OciRequestFailed
+     * @throws GuzzleException
+     */
+    public function listObjectsPage(string $fullPrefix, ?string $delimiter, ?string $start, int $limit = 1000): array
+    {
+        $query = array_filter([
+            'prefix' => $fullPrefix,
+            'delimiter' => $delimiter,
+            'start' => $start,
+            'limit' => $limit,
+            'fields' => self::LIST_FIELDS,
+        ], static fn (mixed $value): bool => $value !== null && $value !== '');
+
+        $response = ResponseGuard::ok(
+            $this->send(sprintf('%s/o?%s', $this->getBucketUri(), http_build_query($query, '', '&', PHP_QUERY_RFC3986)), 'GET'),
+            'list',
+        );
+
+        $data = json_decode((string) $response->getBody(), true);
+        $data = is_array($data) ? $data : [];
+
+        return [
+            'objects' => array_values($data['objects'] ?? []),
+            'prefixes' => array_values($data['prefixes'] ?? []),
+            'nextStartWith' => isset($data['nextStartWith']) && $data['nextStartWith'] !== '' ? (string) $data['nextStartWith'] : null,
+        ];
     }
 
     /**
@@ -582,7 +741,7 @@ final readonly class OciClient
     {
         $prefix = $this->getPrefix();
 
-        if ($prefix === '' || ! str_starts_with($prefixedPath, $prefix . '/')) {
+        if ($prefix === '' || ! str_starts_with($prefixedPath, $prefix.'/')) {
             return $prefixedPath;
         }
 
@@ -602,8 +761,8 @@ final readonly class OciClient
         // If prefix is configured, add it to the options
         if ($prefix !== '') {
             $options['prefix'] = isset($options['prefix'])
-                ? $prefix . '/' . ltrim($options['prefix'], '/')
-                : $prefix . '/';
+                ? $prefix.'/'.ltrim($options['prefix'], '/')
+                : $prefix.'/';
         }
 
         return $this->listObjects($options);

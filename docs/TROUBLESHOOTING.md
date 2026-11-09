@@ -9,6 +9,7 @@ Comprehensive troubleshooting guide for the Laravel OCI Driver package.
 -   [Quick Diagnostics](#quick-diagnostics)
 -   [Authentication Issues](#authentication-issues)
 -   [Configuration Problems](#configuration-problems)
+-   [Object Names and Prefixes](#object-names-and-prefixes)
 -   [Network and Connectivity](#network-and-connectivity)
 -   [File Operation Errors](#file-operation-errors)
 -   [Performance Issues](#performance-issues)
@@ -170,6 +171,40 @@ OCI_PASSPHRASE=your_key_passphrase
 ```bash
 openssl rsa -in encrypted_key.pem -out .oci/oci_api_key.pem
 ```
+
+## Object Names and Prefixes
+
+### Issue: Files with spaces, `+` or `%` in their names
+
+Object names are percent-encoded as a single path segment (`rawurlencode`), so `my file+1.txt` is stored with exactly that name and `/` inside a name is sent as `%2F`. If an object cannot be found, list the bucket and compare the raw object names; check that the name was not already URL-encoded by your own code before it reached the driver (that would store `%20` literally).
+
+### Issue: Listed paths no longer contain the prefix
+
+With `url_path_prefix` set, `files()`, `allFiles()` and `listContents()` return paths **relative to the prefix**, matching what you pass to `get()`/`put()`. Code that stripped the prefix manually must stop doing so.
+
+### Issue: A path is not prefixed (or is prefixed twice)
+
+A path counts as already prefixed only if it equals the prefix or starts with `prefix/`. A prefix of `local` therefore leaves `localfoo` alone and stores it as `local/localfoo`. If you call `OciClient` methods directly with an already-prefixed path they are not prefixed again.
+
+### Issue: `setVisibility()` throws `UnableToSetVisibility`
+
+OCI has no per-object ACL, so by default visibility cannot be set. Either remove the call, or opt in to mapping visibility onto storage tiers with a `visibility_mapping` on the disk, for example `['public' => 'Standard', 'private' => 'InfrequentAccess']`.
+
+### Issue: `deleteDirectory()`, tier change or restore now throws
+
+These used to report success even when OCI refused them. They now throw (`UnableToDeleteDirectory` listing the failed keys, `UnableToWriteFile`, ...) with the OCI request id in the previous exception. Read `$e->getPrevious()->getMessage()` and the `opc-request-id`.
+
+### Issue: Private key rejected
+
+The key is read from `private_key`, then `private_key_base64`, then `key_path`. URLs are not accepted as key paths. For an encrypted key set `passphrase`. `php artisan oci:config --validate --disk=<disk>` reports which value is missing.
+
+### Issue: Multipart upload fails with a part-size error
+
+`upload.chunk_size` must be at least 10 MiB (10485760); smaller values are raised automatically. A single object can have at most 10,000 parts, so very large uploads need a larger `chunk_size`.
+
+### Issue: Expired pre-authenticated requests pile up
+
+`temporaryUrl()` creates a PAR on every call. Delete expired ones created by this package with `php artisan oci:par:prune oci` (add `--dry-run` to preview) and schedule it daily.
 
 ## Configuration Problems
 

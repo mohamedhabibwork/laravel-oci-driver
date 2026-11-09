@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace LaravelOCI\LaravelOciDriver;
 
+use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
@@ -21,7 +23,7 @@ final class LaravelOciDriver
      *
      * @param  string|null  $disk  The disk name (defaults to 'oci')
      */
-    public static function disk(?string $disk = null): \Illuminate\Contracts\Filesystem\Filesystem
+    public static function disk(?string $disk = null): Filesystem
     {
         return Storage::disk($disk ?? 'oci');
     }
@@ -64,7 +66,7 @@ final class LaravelOciDriver
         $storage = self::disk($disk);
 
         // Handle different file types
-        if ($file instanceof \Illuminate\Http\UploadedFile) {
+        if ($file instanceof UploadedFile) {
             return $storage->putFileAs(
                 dirname($path),
                 $file,
@@ -214,7 +216,7 @@ final class LaravelOciDriver
      *
      * @param  string  $source  Source file path
      * @param  string  $destination  Destination file path
-     * @param  array<string, mixed>  $options  Copy options
+     * @param  array<string, mixed>  $options  Ignored: Laravel's Filesystem::copy() accepts no options
      * @param  string|null  $disk  The disk name
      * @return bool True if successful
      */
@@ -238,7 +240,7 @@ final class LaravelOciDriver
      *
      * @param  string  $source  Source file path
      * @param  string  $destination  Destination file path
-     * @param  array<string, mixed>  $options  Move options
+     * @param  array<string, mixed>  $options  Ignored: Laravel's Filesystem::move() accepts no options
      * @param  string|null  $disk  The disk name
      * @return bool True if successful
      */
@@ -262,7 +264,7 @@ final class LaravelOciDriver
      *
      * @param  string  $directory  Directory path
      * @param  bool  $recursive  Whether to list recursively
-     * @param  array<string, mixed>  $options  Listing options
+     * @param  array<string, mixed>  $options  Supports `['recursive' => true]` as an alternative to $recursive
      * @param  string|null  $disk  The disk name
      * @return array<string> List of file paths
      */
@@ -274,7 +276,7 @@ final class LaravelOciDriver
     ): array {
         $storage = self::disk($disk);
 
-        if ($recursive) {
+        if ($recursive || ($options['recursive'] ?? false) === true) {
             return $storage->allFiles($directory);
         }
 
@@ -332,14 +334,28 @@ final class LaravelOciDriver
      *
      * @param  string  $connection  Connection name
      */
-    public static function connection(string $connection): \Illuminate\Contracts\Filesystem\Filesystem
+    public static function connection(string $connection): Filesystem
     {
-        // Validate connection exists
-        if (! OciConfig::connectionExists($connection)) {
-            throw new \InvalidArgumentException("OCI connection '{$connection}' does not exist.");
+        return Storage::disk(self::resolveDiskName($connection));
+    }
+
+    /**
+     * Resolve a connection name to an OCI disk name.
+     *
+     * Prefers a disk with the given name whose driver is `oci`, then the
+     * legacy `oci_{name}` disk.
+     *
+     * @throws \InvalidArgumentException when neither disk is an OCI disk
+     */
+    public static function resolveDiskName(string $name): string
+    {
+        foreach ([$name, "oci_{$name}"] as $candidate) {
+            if (config("filesystems.disks.{$candidate}.driver") === 'oci') {
+                return $candidate;
+            }
         }
 
-        return Storage::disk("oci_{$connection}");
+        throw new \InvalidArgumentException("OCI disk '{$name}' is not configured");
     }
 
     /**
@@ -373,8 +389,7 @@ final class LaravelOciDriver
 
         foreach ($connections as $connection) {
             try {
-                $config = self::getConnectionConfig($connection);
-                $results[$connection] = self::testConnection("oci_{$connection}");
+                $results[$connection] = self::testConnection(self::resolveDiskName($connection));
             } catch (\Exception $e) {
                 $results[$connection] = false;
             }
@@ -406,7 +421,7 @@ final class LaravelOciDriver
     /**
      * Switch between production and development configurations.
      */
-    public static function useProduction(): \Illuminate\Contracts\Filesystem\Filesystem
+    public static function useProduction(): Filesystem
     {
         $connections = self::getAvailableConnections();
 
@@ -424,7 +439,7 @@ final class LaravelOciDriver
     /**
      * Switch to development configuration.
      */
-    public static function useDevelopment(): \Illuminate\Contracts\Filesystem\Filesystem
+    public static function useDevelopment(): Filesystem
     {
         $connections = self::getAvailableConnections();
 
@@ -444,7 +459,7 @@ final class LaravelOciDriver
      *
      * @param  array<string, mixed>  $overrides  Configuration overrides
      */
-    public static function createTemporaryConnection(array $overrides = []): \Illuminate\Contracts\Filesystem\Filesystem
+    public static function createTemporaryConnection(array $overrides = []): Filesystem
     {
         $baseConfig = self::getConnectionConfig()->toArray();
         $tempConfig = array_merge($baseConfig, $overrides);

@@ -32,30 +32,49 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        php: ["8.2", "8.3"]
-        laravel: ["10.*","11.*", "12.*"]
-        stability: [prefer-stable]
+        php: ["8.2", "8.3", "8.4", "8.5"]
+        laravel: ["11.*", "12.*", "13.*"]
+        stability: [prefer-lowest, prefer-stable]
         include:
-          - laravel: "10.*"
-            testbench: "10.*"
           - laravel: "11.*"
-            testbench: "10.*"
+            testbench: "9.*"
           - laravel: "12.*"
             testbench: "10.*"
+          - laravel: "13.*"
+            testbench: "11.*"
         exclude:
-          - php: "8.3"
+          # Laravel 13 requires PHP ^8.3
+          - laravel: "13.*"
+            php: "8.2"
+          # prefer-lowest only on the lowest PHP version of each Laravel line
+          - stability: prefer-lowest
+            laravel: "11.*"
+            php: "8.3"
+          - stability: prefer-lowest
+            laravel: "11.*"
+            php: "8.4"
+          - stability: prefer-lowest
+            laravel: "11.*"
+            php: "8.5"
+          - stability: prefer-lowest
             laravel: "12.*"
+            php: "8.3"
+          - stability: prefer-lowest
+            laravel: "12.*"
+            php: "8.4"
+          - stability: prefer-lowest
+            laravel: "12.*"
+            php: "8.5"
+          - stability: prefer-lowest
+            laravel: "13.*"
+            php: "8.4"
+          - stability: prefer-lowest
+            laravel: "13.*"
+            php: "8.5"
 
     name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }} - ${{ matrix.os }}
 
     steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -131,33 +150,3 @@ jobs:
             build/logs/
             build/coverage/
           retention-days: 3
-
-  minimum-version-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    name: Minimum Version Test
-    steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.2"
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick, fileinfo
-          coverage: none
-          tools: composer:v2
-
-      - name: Install minimum dependencies
-        run: |
-          composer update --prefer-lowest --prefer-stable --prefer-dist --no-interaction --no-progress
-
-      - name: Execute tests
-        run: vendor/bin/pest --ci

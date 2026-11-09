@@ -110,7 +110,8 @@ final class OciConnectionCommand extends Command
         $this->info("🔗 Testing connection: {$connection}");
 
         try {
-            $config = OciConfig::fromConnection($connection);
+            $diskName = LaravelOciDriver::resolveDiskName($connection);
+            $config = OciConfig::fromDiskConfig((array) config("filesystems.disks.{$diskName}"), $diskName);
             $errors = $config->validate();
 
             if (! empty($errors)) {
@@ -125,7 +126,7 @@ final class OciConnectionCommand extends Command
             $this->line('✅ Configuration is valid');
 
             // Test actual connection
-            $result = LaravelOciDriver::testConnection("oci_{$connection}");
+            $result = LaravelOciDriver::testConnection($diskName);
 
             if ($result) {
                 $this->info('🎉 Connection test successful!');

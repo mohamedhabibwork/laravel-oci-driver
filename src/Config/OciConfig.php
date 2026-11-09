@@ -57,6 +57,69 @@ final readonly class OciConfig
     }
 
     /**
+     * Build a config from a single disk's own configuration.
+     *
+     * When the disk names a `connection`, that connection's values from
+     * `laravel-oci-driver.connections` sit underneath; the disk's values win.
+     *
+     * @param  array<string, mixed>  $diskConfig
+     */
+    public static function fromDiskConfig(array $diskConfig, string $diskName = 'oci'): static
+    {
+        $connection = $diskConfig['connection'] ?? null;
+
+        if (is_string($connection) && $connection !== '') {
+            $base = config("laravel-oci-driver.connections.{$connection}", []);
+            $diskConfig = array_merge(is_array($base) ? $base : [], $diskConfig);
+        }
+
+        return new self($diskConfig);
+    }
+
+    /**
+     * Assert that every required value is present.
+     *
+     * @throws \InvalidArgumentException naming the disk and the missing keys
+     */
+    public function assertValid(string $diskName): void
+    {
+        $missing = [];
+
+        foreach (['namespace', 'region', 'bucket', 'tenancy_id', 'user_id', 'key_fingerprint'] as $key) {
+            if ($this->isBlank($this->get($key))) {
+                $missing[] = $key;
+            }
+        }
+
+        $hasKey = false;
+        foreach (['private_key', 'private_key_base64', 'key_path'] as $key) {
+            $hasKey = $hasKey || ! $this->isBlank($this->get($key));
+        }
+        if (! $hasKey) {
+            $missing[] = 'private_key|private_key_base64|key_path';
+        }
+
+        if ($missing !== []) {
+            throw new \InvalidArgumentException(
+                sprintf("OCI disk '%s' is missing: %s", $diskName, implode(', ', $missing))
+            );
+        }
+    }
+
+    /**
+     * Get the multipart upload chunk size in bytes (never below 10 MiB).
+     */
+    public function getChunkSize(): int
+    {
+        return max(10485760, (int) $this->get('upload.chunk_size', 33554432));
+    }
+
+    private function isBlank(mixed $value): bool
+    {
+        return $value === null || (is_string($value) && trim($value) === '');
+    }
+
+    /**
      * Get tenancy ID.
      */
     public function getTenancyId(): string
@@ -175,7 +238,7 @@ final readonly class OciConfig
     public function getUploadConfig(): array
     {
         return $this->get('upload', [
-            'chunk_size' => 8388608, // 8MB
+            'chunk_size' => 33554432, // 32MB
             'multipart_threshold' => 104857600, // 100MB
             'enable_checksum' => true,
         ]);
@@ -296,7 +359,6 @@ final readonly class OciConfig
             'tenancy_id',
             'user_id',
             'key_fingerprint',
-            'key_path',
             'namespace',
             'region',
             'bucket',
@@ -308,6 +370,13 @@ final readonly class OciConfig
             } catch (\InvalidArgumentException $e) {
                 $errors[] = $e->getMessage();
             }
+        }
+
+        // Any one of the three key sources is enough
+        $keySources = ['private_key', 'private_key_base64', 'key_path'];
+        $hasKeySource = array_filter($keySources, fn (string $key): bool => ! $this->isBlank($this->get($key))) !== [];
+        if (! $hasKeySource) {
+            $errors[] = 'Missing required configuration: one of private_key, private_key_base64 or key_path';
         }
 
         // Validate fingerprint format
@@ -330,8 +399,8 @@ final readonly class OciConfig
             // Already handled above
         }
 
-        // Validate key path exists (skip in testing)
-        if (! $this->isTestingEnvironment()) {
+        // Validate key path exists (skip in testing, or when another key source is set)
+        if (! $this->isTestingEnvironment() && $this->isBlank($this->get('private_key')) && $this->isBlank($this->get('private_key_base64'))) {
             try {
                 $keyPath = $this->getKeyPath();
                 if (! file_exists($keyPath)) {
@@ -450,7 +519,7 @@ final readonly class OciConfig
     {
         $newConfig = array_merge($this->config, $overrides);
 
-        return new static($newConfig);
+        return new self($newConfig);
     }
 
     /**

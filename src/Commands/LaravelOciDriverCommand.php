@@ -22,7 +22,8 @@ class LaravelOciDriverCommand extends Command
 
         try {
             $diskName = 'oci';
-            $bucket = $this->option('bucket');
+            $bucketOption = $this->option('bucket');
+            $bucket = is_string($bucketOption) && $bucketOption !== '' ? $bucketOption : null;
 
             if (! config()->has("filesystems.disks.$diskName")) {
                 $this->error("The '$diskName' disk is not configured in your filesystems.php config file.");
@@ -127,7 +128,7 @@ class LaravelOciDriverCommand extends Command
         $units = ['B', 'KB', 'MB', 'GB', 'TB'];
 
         $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = (int) floor(($bytes ? log($bytes) : 0) / log(1024));
         $pow = min($pow, count($units) - 1);
 
         $bytes /= (1 << (10 * $pow));
