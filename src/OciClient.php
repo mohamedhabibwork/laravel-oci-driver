@@ -27,7 +27,7 @@ final readonly class OciClient
     public const PAR_NAME_PREFIX = 'laravel-oci-';
 
     /** Object fields requested on listings. */
-    public const LIST_FIELDS = 'name,size,timeCreated,timeModified,md5,storageTier';
+    public const LIST_FIELDS = 'name,size,etag,timeCreated,timeModified,md5,storageTier';
 
     /**
      * OCI client configuration.
@@ -170,6 +170,25 @@ final readonly class OciClient
         }
 
         // An empty path addresses the prefix itself.
+        return $path === '' ? $prefix : $prefix.'/'.$path;
+    }
+
+    /**
+     * Object name of a path as the adapter stores it: the configured prefix is always applied,
+     * even when the path happens to start with the prefix text.
+     *
+     * Unlike getPrefixedPath() this is not idempotent; pass its result (already prefixed) to the
+     * idempotent client helpers (bulkDelete, renameObjectBody, ...) and they leave it unchanged.
+     */
+    public function prefixObjectName(string $path): string
+    {
+        $prefix = $this->getPrefix();
+        $path = ltrim($path, '/');
+
+        if ($prefix === '') {
+            return $path;
+        }
+
         return $path === '' ? $prefix : $prefix.'/'.$path;
     }
 
@@ -462,7 +481,7 @@ final readonly class OciClient
             );
 
             return $response->getStatusCode() === 200;
-        } catch (GuzzleException) {
+        } catch (GuzzleException|\JsonException) {
             return false;
         }
     }
@@ -666,7 +685,7 @@ final readonly class OciClient
         ]);
 
         if (! empty($queryParams)) {
-            $uri .= '?'.http_build_query($queryParams);
+            $uri .= '?'.http_build_query($queryParams, '', '&', PHP_QUERY_RFC3986);
         }
 
         $response = ResponseGuard::ok($this->send($uri, 'GET'), 'list');
@@ -693,7 +712,7 @@ final readonly class OciClient
         ], static fn (mixed $value): bool => $value !== null && $value !== '');
 
         $response = ResponseGuard::ok(
-            $this->send(sprintf('%s/o?%s', $this->getBucketUri(), http_build_query($query)), 'GET'),
+            $this->send(sprintf('%s/o?%s', $this->getBucketUri(), http_build_query($query, '', '&', PHP_QUERY_RFC3986)), 'GET'),
             'list',
         );
 

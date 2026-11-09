@@ -51,10 +51,11 @@ final class MultipartUploader
      */
     private function create(string $objectName, array $headers): string
     {
+        // OCI expects metadata keys in opc-meta-* form; headers already carry it.
         $metadata = [];
         foreach ($headers as $name => $value) {
             if (stripos($name, self::META_PREFIX) === 0) {
-                $metadata[substr($name, strlen(self::META_PREFIX))] = $value;
+                $metadata[$name] = $value;
             }
         }
 
@@ -111,6 +112,7 @@ final class MultipartUploader
                 [],
                 $part,
                 'application/octet-stream',
+                ['timeout' => 0],
             ), 'multipart part');
 
             $parts[] = ['partNum' => $partNumber, 'etag' => $response->getHeaderLine('etag')];

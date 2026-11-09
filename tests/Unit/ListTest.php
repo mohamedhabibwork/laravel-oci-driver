@@ -37,7 +37,7 @@ it('requests fields', function () {
     iterator_to_array($fake->adapter()->listContents('', true));
 
     $query = queryOf($fake->lastRequest());
-    expect($query['fields'])->toBe('name,size,timeCreated,timeModified,md5,storageTier')
+    expect($query['fields'])->toBe('name,size,etag,timeCreated,timeModified,md5,storageTier')
         ->and($query['limit'])->toBe('1000')
         ->and($query)->not->toHaveKey('delimiter');
 });

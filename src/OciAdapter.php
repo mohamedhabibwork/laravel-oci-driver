@@ -8,6 +8,9 @@ use GuzzleHttp\Psr7\LimitStream;
 use GuzzleHttp\Psr7\Utils;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
+use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
+use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
+use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
 use LaravelOCI\LaravelOciDriver\Support\MultipartUploader;
 use LaravelOCI\LaravelOciDriver\Support\ResponseGuard;
 use LaravelOCI\LaravelOciDriver\Support\WorkRequestPoller;
@@ -50,10 +53,40 @@ final readonly class OciAdapter implements FilesystemAdapter
         $ociConfig = $client->getOciConfig();
         $this->workRequestPoller = new WorkRequestPoller(
             $client,
-            (int) $ociConfig->get('copy_timeout', 300),
-            (int) $ociConfig->get('copy_poll_interval', 1000),
+            max(0, (int) $ociConfig->get('copy_timeout', 300)),
+            max(100, (int) $ociConfig->get('copy_poll_interval', 1000)),
             $sleep,
         );
+    }
+
+    /**
+     * Failures every operation maps to its Flysystem exception: HTTP/transport errors, key and
+     * signing errors, JSON encoding errors and invalid request values (for example a bad header).
+     */
+    private const MAPPED_FAILURES = [
+        OciRequestFailed::class,
+        GuzzleException::class,
+        PrivateKeyFileNotFoundException::class,
+        SignerValidateException::class,
+        SigningValidationFailedException::class,
+        \JsonException::class,
+        \InvalidArgumentException::class,
+    ];
+
+    /**
+     * Return the exception when it is one the operation maps (the shared set plus $extra), otherwise rethrow it.
+     *
+     * @param  class-string  ...$extra  Operation-specific failure types
+     */
+    private function mappable(\Throwable $exception, string ...$extra): \Throwable
+    {
+        foreach ([...self::MAPPED_FAILURES, ...$extra] as $type) {
+            if ($exception instanceof $type) {
+                return $exception;
+            }
+        }
+
+        throw $exception;
     }
 
     /**
@@ -79,17 +112,18 @@ final readonly class OciAdapter implements FilesystemAdapter
             $page = $this->client->listObjectsPage($this->directoryPrefix($path), null, null, 1);
 
             return $page['objects'] !== [] || $page['prefixes'] !== [];
-        } catch (OciRequestFailed|GuzzleException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToCheckExistence::forLocation($path, $exception);
         }
     }
 
     /**
-     * The full (configured-prefix-aware) listing prefix of a directory, with a trailing slash; '' for the root.
+     * The full listing prefix of a directory, with a trailing slash; '' for the root.
      */
     private function directoryPrefix(string $path): string
     {
-        $prefixed = rtrim($this->client->getPrefixedPath($path), '/');
+        $prefixed = rtrim($this->client->prefixObjectName($path), '/');
 
         return $prefixed === '' ? '' : $prefixed.'/';
     }
@@ -102,7 +136,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     private function exists(string $path): bool
     {
-        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
+        $uri = $this->client->getObjectUri($this->client->prefixObjectName($path));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -112,7 +146,8 @@ final readonly class OciAdapter implements FilesystemAdapter
                 404 => false,
                 default => throw OciRequestFailed::fromResponse($response, 'exists'),
             };
-        } catch (OciRequestFailed|GuzzleException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToCheckExistence::forLocation($path, $exception);
         }
     }
@@ -150,13 +185,14 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function read(string $path): string
     {
-        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
+        $uri = $this->client->getObjectUri($this->client->prefixObjectName($path));
 
         try {
             $response = ResponseGuard::ok($this->client->send($uri, 'GET'), 'read');
 
             return $response->getBody()->getContents();
-        } catch (OciRequestFailed|GuzzleException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
         }
     }
@@ -171,7 +207,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function readStream(string $path)
     {
-        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
+        $uri = $this->client->getObjectUri($this->client->prefixObjectName($path));
 
         try {
             $response = ResponseGuard::ok(
@@ -185,7 +221,8 @@ final readonly class OciAdapter implements FilesystemAdapter
             }
 
             return $resource;
-        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception, RuntimeException::class);
             throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
         }
     }
@@ -203,6 +240,11 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function deleteDirectory(string $path): void
     {
         $fullPrefix = $this->directoryPrefix($path);
+
+        if ($fullPrefix === '') {
+            throw UnableToDeleteDirectory::atLocation($path, 'refusing to delete the bucket root; configure url_path_prefix or delete a sub-directory');
+        }
+
         $failed = [];
         $start = null;
 
@@ -221,7 +263,8 @@ final readonly class OciAdapter implements FilesystemAdapter
                 $advance = $next !== null && $next !== $start;
                 $start = $next;
             } while ($advance);
-        } catch (OciRequestFailed|GuzzleException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToDeleteDirectory::atLocation($path, $exception->getMessage(), $exception);
         }
 
@@ -239,14 +282,14 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function delete(string $path): void
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
+        $prefixedPath = $this->client->prefixObjectName($path);
         $isDirectoryPath = $prefixedPath === '' || str_ends_with($prefixedPath, '/');
 
         // If it appears to be a directory, check if it has contents
         if ($isDirectoryPath) {
             $dirPath = rtrim($prefixedPath, '/').'/';
             $queryParams = ['prefix' => $dirPath, 'limit' => 1]; // Just need to know if at least one object exists
-            $requestUri = sprintf('%s/o', $this->client->getBucketUri()).'?'.http_build_query($queryParams);
+            $requestUri = sprintf('%s/o', $this->client->getBucketUri()).'?'.http_build_query($queryParams, '', '&', PHP_QUERY_RFC3986);
 
             try {
                 $response = $this->client->send($requestUri, 'GET');
@@ -261,7 +304,8 @@ final readonly class OciAdapter implements FilesystemAdapter
                         return;
                     }
                 }
-            } catch (GuzzleException $exception) {
+            } catch (\Throwable $exception) {
+                $exception = $this->mappable($exception);
                 throw UnableToDeleteFile::atLocation($path, $exception->getMessage(), $exception);
             }
         }
@@ -271,7 +315,8 @@ final readonly class OciAdapter implements FilesystemAdapter
 
         try {
             ResponseGuard::ok($this->client->send($uri, 'DELETE'), 'delete', 200, 204, 404);
-        } catch (OciRequestFailed|GuzzleException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToDeleteFile::atLocation($path, $exception->getMessage(), $exception);
         }
     }
@@ -284,17 +329,18 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function createDirectory(string $path, Config $config): void
     {
-        $prefixed = rtrim($this->client->getPrefixedPath($path), '/');
+        $prefixed = rtrim($this->client->prefixObjectName($path), '/');
 
         try {
             ResponseGuard::ok($this->client->send(
                 $this->client->getObjectUri($prefixed === '' ? '/' : $prefixed.'/'),
                 'PUT',
-                ['Content-Length' => '0'],
+                [],
                 '',
                 'application/x-directory',
             ), 'createDirectory');
-        } catch (OciRequestFailed|GuzzleException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToCreateDirectory::atLocation($path, $exception->getMessage(), $exception);
         }
     }
@@ -323,7 +369,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     private function upload(string $path, StreamInterface $body, ?int $size, Config $config, bool $checksum, ?string $checksumSource = null): void
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
+        $prefixedPath = $this->client->prefixObjectName($path);
         $ociConfig = $this->client->getOciConfig();
 
         try {
@@ -340,6 +386,7 @@ final readonly class OciAdapter implements FilesystemAdapter
                     $headers + ['Content-Length' => (string) $size],
                     $body,
                     $headers['Content-Type'],
+                    ['timeout' => 0],
                 ), 'write');
 
                 return;
@@ -347,7 +394,8 @@ final readonly class OciAdapter implements FilesystemAdapter
 
             (new MultipartUploader($this->client, $ociConfig->getChunkSize()))
                 ->upload($prefixedPath, $body, $headers);
-        } catch (OciRequestFailed|GuzzleException|\LengthException|\UnexpectedValueException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception, \LengthException::class, \UnexpectedValueException::class);
             throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
         }
     }
@@ -369,6 +417,23 @@ final readonly class OciAdapter implements FilesystemAdapter
         }
 
         return $headers;
+    }
+
+    /**
+     * OCI expects user metadata keys in opc-meta-* form; keys already in that form are kept.
+     *
+     * @param  array<array-key, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    private function toOpcMetaKeys(array $metadata): array
+    {
+        $result = [];
+        foreach ($metadata as $key => $value) {
+            $key = (string) $key;
+            $result[str_starts_with(strtolower($key), 'opc-meta-') ? $key : 'opc-meta-'.$key] = $value;
+        }
+
+        return $result;
     }
 
     /**
@@ -449,8 +514,9 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function visibility(string $path): FileAttributes
     {
         try {
-            $objectInfo = $this->client->getObjectInfo($path);
-        } catch (OciRequestFailed|GuzzleException $exception) {
+            $objectInfo = $this->client->getObjectInfo($this->client->prefixObjectName($path));
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToRetrieveMetadata::visibility($path, $exception->getMessage(), $exception);
         }
 
@@ -498,7 +564,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function mimeType(string $path): FileAttributes
     {
-        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
+        $uri = $this->client->getObjectUri($this->client->prefixObjectName($path));
 
         try {
             $response = ResponseGuard::ok($this->client->send($uri, 'HEAD'), 'mimeType');
@@ -508,7 +574,8 @@ final readonly class OciAdapter implements FilesystemAdapter
             $mimeType = $response->getHeaderLine('Content-Type');
 
             return new FileAttributes(path: $path, mimeType: $mimeType);
-        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception, RuntimeException::class);
             throw UnableToRetrieveMetadata::mimeType($path, $exception->getMessage(), $exception);
         }
     }
@@ -523,7 +590,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function lastModified(string $path): FileAttributes
     {
-        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
+        $uri = $this->client->getObjectUri($this->client->prefixObjectName($path));
 
         try {
             $response = ResponseGuard::ok($this->client->send($uri, 'HEAD'), 'lastModified');
@@ -533,7 +600,8 @@ final readonly class OciAdapter implements FilesystemAdapter
             $lastModified = Carbon::parse($response->getHeaderLine('last-modified'))->getTimestamp();
 
             return new FileAttributes(path: $path, lastModified: $lastModified);
-        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception, RuntimeException::class);
             throw UnableToRetrieveMetadata::lastModified($path, $exception->getMessage(), $exception);
         }
     }
@@ -548,7 +616,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function fileSize(string $path): FileAttributes
     {
-        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
+        $uri = $this->client->getObjectUri($this->client->prefixObjectName($path));
 
         try {
             $response = ResponseGuard::ok($this->client->send($uri, 'HEAD'), 'fileSize');
@@ -558,7 +626,8 @@ final readonly class OciAdapter implements FilesystemAdapter
             $fileSize = (int) $response->getHeaderLine('Content-Length');
 
             return new FileAttributes(path: $path, fileSize: $fileSize);
-        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception, RuntimeException::class);
             throw UnableToRetrieveMetadata::fileSize($path, $exception->getMessage(), $exception);
         }
     }
@@ -584,7 +653,8 @@ final readonly class OciAdapter implements FilesystemAdapter
         do {
             try {
                 $page = $this->client->listObjectsPage($fullPrefix, $delimiter, $start, self::LIST_PAGE_SIZE);
-            } catch (OciRequestFailed|GuzzleException $exception) {
+            } catch (\Throwable $exception) {
+                $exception = $this->mappable($exception);
                 throw UnableToListContents::atLocation($path, $deep, $exception);
             }
 
@@ -661,10 +731,11 @@ final readonly class OciAdapter implements FilesystemAdapter
                 $this->client->renameObjectUri(),
                 'POST',
                 [],
-                $this->client->renameObjectBody($source, $destination),
+                $this->client->renameObjectBody($this->client->prefixObjectName($source), $this->client->prefixObjectName($destination)),
             );
             ResponseGuard::ok($response, 'rename object');
-        } catch (OciRequestFailed|GuzzleException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToMoveFile::fromLocationTo($source, $destination, $exception);
         }
     }
@@ -685,16 +756,16 @@ final readonly class OciAdapter implements FilesystemAdapter
         $uri = sprintf('%s/actions/copyObject', $this->client->getBucketUri());
 
         $payload = [
-            'sourceObjectName' => $this->client->getPrefixedPath($source),
+            'sourceObjectName' => $this->client->prefixObjectName($source),
             'destinationRegion' => $this->client->getRegion(),
             'destinationNamespace' => $this->client->getNamespace(),
             'destinationBucket' => $this->client->getBucket(),
-            'destinationObjectName' => $this->client->getPrefixedPath($destination),
+            'destinationObjectName' => $this->client->prefixObjectName($destination),
         ];
 
         $metadata = $config->get('metadata');
         if (is_array($metadata) && $metadata !== []) {
-            $payload['destinationObjectMetadata'] = $metadata;
+            $payload['destinationObjectMetadata'] = $this->toOpcMetaKeys($metadata);
         }
 
         $tier = $config->get('storage_tier');
@@ -717,7 +788,8 @@ final readonly class OciAdapter implements FilesystemAdapter
             }
 
             $this->workRequestPoller->wait($workRequestId);
-        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception, RuntimeException::class);
             throw UnableToCopyFile::fromLocationTo($source, $destination, $exception);
         }
     }
@@ -740,10 +812,11 @@ final readonly class OciAdapter implements FilesystemAdapter
                 $this->client->restoreObjectUri(),
                 'POST',
                 [],
-                $this->client->restoreObjectBody($path, $hours),
+                $this->client->restoreObjectBody($this->client->prefixObjectName($path), $hours),
             );
             ResponseGuard::ok($response, 'restore object', 200, 202);
-        } catch (OciRequestFailed|GuzzleException|\JsonException|\InvalidArgumentException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
         }
 
@@ -764,7 +837,11 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function updateStorageTier(string $path, string|StorageTier $storageTier): bool
     {
         if (is_string($storageTier)) {
-            $storageTier = StorageTier::fromString($storageTier);
+            $tier = StorageTier::tryFrom($storageTier);
+            if ($tier === null) {
+                throw UnableToWriteFile::atLocation($path, "unknown storage tier '{$storageTier}'");
+            }
+            $storageTier = $tier;
         }
 
         try {
@@ -772,10 +849,11 @@ final readonly class OciAdapter implements FilesystemAdapter
                 $this->client->updateStorageTierUri(),
                 'POST',
                 [],
-                $this->client->updateStorageTierBody($path, $storageTier),
+                $this->client->updateStorageTierBody($this->client->prefixObjectName($path), $storageTier),
             );
             ResponseGuard::ok($response, 'update storage tier');
-        } catch (OciRequestFailed|GuzzleException|\JsonException $exception) {
+        } catch (\Throwable $exception) {
+            $exception = $this->mappable($exception);
             throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
         }
 
@@ -798,7 +876,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function getUrl($path): string
     {
-        return $this->client->getObjectUrl($path);
+        return $this->client->getObjectUri($this->client->prefixObjectName($path));
     }
 
     /**
@@ -811,6 +889,6 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null, array $options = []): string
     {
-        return $this->client->createTemporaryUrl($path, $expiresAt, $options);
+        return $this->client->createTemporaryUrl($this->client->prefixObjectName($path), $expiresAt, $options);
     }
 }

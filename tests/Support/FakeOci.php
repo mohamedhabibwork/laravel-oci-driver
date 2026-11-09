@@ -68,6 +68,20 @@ final class FakeOci
         ];
     }
 
+    /**
+     * Run $operation and return the Throwable it raised, or null when it completed.
+     */
+    public static function caught(\Closure $operation): ?\Throwable
+    {
+        try {
+            $operation();
+        } catch (\Throwable $exception) {
+            return $exception;
+        }
+
+        return null;
+    }
+
     public function client(): OciClient
     {
         return $this->client;

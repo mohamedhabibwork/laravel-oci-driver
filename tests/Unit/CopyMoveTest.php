@@ -76,7 +76,7 @@ it('copy sends metadata and tier when given', function () {
     $fake->adapter()->copy('a', 'b', new Config(['metadata' => ['k' => 'v'], 'storage_tier' => 'InfrequentAccess']));
 
     $body = json_decode((string) $fake->requests()[0]->getBody(), true);
-    expect($body['destinationObjectMetadata'])->toBe(['k' => 'v'])
+    expect($body['destinationObjectMetadata'])->toBe(['opc-meta-k' => 'v'])
         ->and($body['destinationObjectStorageTier'])->toBe('InfrequentAccess');
 });
 
