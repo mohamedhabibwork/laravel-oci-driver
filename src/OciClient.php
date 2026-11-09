@@ -5,21 +5,28 @@ namespace LaravelOCI\LaravelOciDriver;
 use Carbon\Carbon;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Pool;
 use GuzzleHttp\Psr7\Request;
 use Illuminate\Support\Facades\Log;
 use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
+use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
 use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
 use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
 use LaravelOCI\LaravelOciDriver\Support\HttpClientFactory;
 use LaravelOCI\LaravelOciDriver\Support\ObjectNameEncoder;
+use LaravelOCI\LaravelOciDriver\Support\ResponseGuard;
+use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamInterface;
 use Ramsey\Uuid\Uuid;
 
 final readonly class OciClient
 {
+    /** Object fields requested on listings. */
+    public const LIST_FIELDS = 'name,size,timeCreated,timeModified,md5,storageTier';
+
     /**
      * OCI client configuration.
      */
@@ -325,82 +332,66 @@ final readonly class OciClient
     }
 
     /**
-     * Bulk delete objects from the bucket.
+     * Build a signed DELETE request for an already-prefixed object name.
+     */
+    public function deleteObjectRequest(string $prefixedName): RequestInterface
+    {
+        $uri = $this->getObjectUri($prefixedName);
+
+        return new Request('DELETE', $uri, $this->getAuthorizationHeaders($uri, 'DELETE'));
+    }
+
+    /**
+     * Delete many objects concurrently with native single-object DELETEs.
      *
-     * @link https://docs.oracle.com/en-us/iaas/api/#/en/s3objectstorage/20160918/Object/BulkDelete
+     * A 404 counts as deleted. Paths are run through the configured prefix rule.
+     *
+     * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/DeleteObject
      *
      * @param  array<string>  $paths  List of object paths to delete
-     * @return array{deleted: array<string>, errors: array<array{path: string, error: string}>}
-     *
-     * @throws GuzzleException
+     * @return array{deleted: list<string>, errors: list<array{path: string, error: string}>}
      */
     public function bulkDelete(array $paths): array
     {
-        if (empty($paths)) {
+        $paths = array_values($paths);
+        if ($paths === []) {
             return ['deleted' => [], 'errors' => []];
         }
 
-        $uri = sprintf('%s?delete', $this->getBucketUri());
-
-        $xml = new \SimpleXMLElement('<Delete></Delete>');
-        $xml->addChild('Quiet', 'true');
-
-        foreach ($paths as $path) {
-            $object = $xml->addChild('Object');
-            $object->addChild('Key', $this->applyPathPrefix($path));
-        }
-
-        $body = $xml->asXML();
-        if ($body === false) {
-            throw new \RuntimeException('Failed to generate XML for bulk delete request');
-        }
-
-        try {
-            // Calculate content MD5 as required by S3 API
-            $contentMD5 = base64_encode(md5($body, true));
-
-            $response = $this->send(
-                $uri,
-                'POST',
-                ['Content-MD5' => $contentMD5],
-                $body,
-                'application/xml'
-            );
-
-            if ($response->getStatusCode() === 200) {
-                // Success - all objects deleted
-                return ['deleted' => $paths, 'errors' => []];
+        $requests = function () use ($paths): \Generator {
+            foreach ($paths as $path) {
+                yield $this->deleteObjectRequest($this->applyPathPrefix($path));
             }
+        };
 
-            // Parse response XML for errors
-            $responseBody = $response->getBody()->getContents();
-            $responseXml = simplexml_load_string($responseBody);
+        /** @var array<int, string|null> $failures index => error message, null when deleted */
+        $failures = [];
 
-            $errors = [];
-            $deleted = [];
+        (new Pool($this->http, $requests(), [
+            'concurrency' => max(1, (int) $this->getOciConfig()->get('delete_concurrency', 10)),
+            'fulfilled' => function (ResponseInterface $response, int $index) use (&$failures): void {
+                $status = $response->getStatusCode();
+                $failures[$index] = in_array($status, [200, 204, 404], true)
+                    ? null
+                    : OciRequestFailed::fromResponse($response, 'delete')->getMessage();
+            },
+            'rejected' => function (mixed $reason, int $index) use (&$failures): void {
+                $failures[$index] = $reason instanceof \Throwable ? $reason->getMessage() : 'delete failed';
+            },
+        ]))->promise()->wait();
 
-            if (isset($responseXml->Error)) {
-                foreach ($responseXml->Error as $error) {
-                    $key = (string) $error->Key;
-                    $message = (string) $error->Message;
-                    $errors[] = ['path' => $key, 'error' => $message];
-                }
-
-                // Calculate which paths were successfully deleted
-                $errorPaths = array_column($errors, 'path');
-                $deleted = array_values(array_diff($paths, $errorPaths));
+        $deleted = [];
+        $errors = [];
+        foreach ($paths as $index => $path) {
+            $error = array_key_exists($index, $failures) ? $failures[$index] : 'no response received';
+            if ($error === null) {
+                $deleted[] = $path;
+            } else {
+                $errors[] = ['path' => $path, 'error' => $error];
             }
-
-            return ['deleted' => $deleted, 'errors' => $errors];
-        } catch (GuzzleException $exception) {
-            // If the request totally failed, report all paths as errors
-            $errors = array_map(fn (string $path) => [
-                'path' => $path,
-                'error' => $exception->getMessage(),
-            ], $paths);
-
-            return ['deleted' => [], 'errors' => $errors];
         }
+
+        return ['deleted' => $deleted, 'errors' => $errors];
     }
 
     /**
@@ -557,11 +548,15 @@ final readonly class OciClient
     /**
      * List objects in the bucket with advanced options.
      *
+     * Returns the decoded OCI page (`objects`, `prefixes`, `nextStartWith`). The `prefix`
+     * option is run through the configured prefix rule.
+     *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/ListObjects
      *
      * @param  array<string, mixed>  $options  Listing options
      * @return array<string, mixed> List of objects and prefixes
      *
+     * @throws OciRequestFailed
      * @throws GuzzleException
      */
     public function listObjects(array $options = []): array
@@ -581,17 +576,42 @@ final readonly class OciClient
             $uri .= '?'.http_build_query($queryParams);
         }
 
-        try {
-            $response = $this->send($uri, 'GET');
+        $response = ResponseGuard::ok($this->send($uri, 'GET'), 'list');
 
-            if ($response->getStatusCode() === 200) {
-                return json_decode($response->getBody()->getContents(), true) ?: [];
-            }
+        return json_decode((string) $response->getBody(), true) ?: [];
+    }
 
-            return [];
-        } catch (GuzzleException $exception) {
-            return [];
-        }
+    /**
+     * Fetch one page of a listing. The prefix is used as given (already includes any configured prefix).
+     *
+     * @return array{objects: list<array<string, mixed>>, prefixes: list<string>, nextStartWith: ?string}
+     *
+     * @throws OciRequestFailed
+     * @throws GuzzleException
+     */
+    public function listObjectsPage(string $fullPrefix, ?string $delimiter, ?string $start, int $limit = 1000): array
+    {
+        $query = array_filter([
+            'prefix' => $fullPrefix,
+            'delimiter' => $delimiter,
+            'start' => $start,
+            'limit' => $limit,
+            'fields' => self::LIST_FIELDS,
+        ], static fn (mixed $value): bool => $value !== null && $value !== '');
+
+        $response = ResponseGuard::ok(
+            $this->send(sprintf('%s/o?%s', $this->getBucketUri(), http_build_query($query)), 'GET'),
+            'list',
+        );
+
+        $data = json_decode((string) $response->getBody(), true);
+        $data = is_array($data) ? $data : [];
+
+        return [
+            'objects' => array_values($data['objects'] ?? []),
+            'prefixes' => array_values($data['prefixes'] ?? []),
+            'nextStartWith' => isset($data['nextStartWith']) && $data['nextStartWith'] !== '' ? (string) $data['nextStartWith'] : null,
+        ];
     }
 
     /**

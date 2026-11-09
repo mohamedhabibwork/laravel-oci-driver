@@ -6,16 +6,19 @@ use Carbon\Carbon;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\LimitStream;
 use GuzzleHttp\Psr7\Utils;
-use Illuminate\Support\Facades\Log;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
 use LaravelOCI\LaravelOciDriver\Support\MultipartUploader;
 use LaravelOCI\LaravelOciDriver\Support\ResponseGuard;
 use League\Flysystem\Config;
+use League\Flysystem\DirectoryAttributes;
 use League\Flysystem\FileAttributes;
 use League\Flysystem\FilesystemAdapter;
+use League\Flysystem\StorageAttributes;
 use League\Flysystem\UnableToCheckExistence;
 use League\Flysystem\UnableToCopyFile;
+use League\Flysystem\UnableToCreateDirectory;
+use League\Flysystem\UnableToDeleteDirectory;
 use League\Flysystem\UnableToDeleteFile;
 use League\Flysystem\UnableToListContents;
 use League\Flysystem\UnableToMoveFile;
@@ -32,6 +35,8 @@ use RuntimeException;
  */
 final readonly class OciAdapter implements FilesystemAdapter
 {
+    private const LIST_PAGE_SIZE = 1000;
+
     /**
      * @param  OciClient  $client  OCI client for API requests
      */
@@ -56,7 +61,23 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function directoryExists(string $path): bool
     {
-        return $this->exists($path);
+        try {
+            $page = $this->client->listObjectsPage($this->directoryPrefix($path), null, null, 1);
+
+            return $page['objects'] !== [] || $page['prefixes'] !== [];
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToCheckExistence::forLocation($path, $exception);
+        }
+    }
+
+    /**
+     * The full (configured-prefix-aware) listing prefix of a directory, with a trailing slash; '' for the root.
+     */
+    private function directoryPrefix(string $path): string
+    {
+        $prefixed = rtrim($this->client->getPrefixedPath($path), '/');
+
+        return $prefixed === '' ? '' : $prefixed.'/';
     }
 
     /**
@@ -156,63 +177,42 @@ final readonly class OciAdapter implements FilesystemAdapter
     }
 
     /**
-     * Delete a directory and all of its contents using bulk delete for efficiency
+     * Delete a directory and everything under it.
      *
-     * This method uses Oracle's BulkDelete API to efficiently remove all objects under a specific directory prefix.
-     * Since OCI doesn't have real directory objects, we look for all objects that share the given prefix and
-     * delete them in a single API call for better performance.
+     * OCI has no real directories, so every object sharing the directory prefix (including
+     * the placeholder) is listed page by page and deleted concurrently.
      *
      * @param  string  $path  Directory path
      *
-     * @throws RuntimeException When unable to list or delete objects
+     * @throws UnableToDeleteDirectory
      */
     public function deleteDirectory(string $path): void
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $dirPath = rtrim($prefixedPath, '/').'/';
-
-        // List all objects in the bucket with the directory prefix
-        $uri = sprintf('%s/o', $this->client->getBucketUri());
-        $queryParams = ['prefix' => $dirPath];
-        $requestUri = $uri.'?'.http_build_query($queryParams);
+        $fullPrefix = $this->directoryPrefix($path);
+        $failed = [];
+        $start = null;
 
         try {
-            $response = $this->client->send($requestUri, 'GET');
+            do {
+                $page = $this->client->listObjectsPage($fullPrefix, null, $start, self::LIST_PAGE_SIZE);
+                $names = array_column($page['objects'], 'name');
 
-            if ($response->getStatusCode() === 200) {
-                $data = json_decode($response->getBody()->getContents(), false);
-
-                // Early return if no objects found
-                if (empty($data->objects)) {
-                    return;
+                if ($names !== []) {
+                    foreach ($this->client->bulkDelete($names)['errors'] as $error) {
+                        $failed[] = $error['path'];
+                    }
                 }
 
-                // Extract all object paths for bulk deletion
-                $objectPaths = array_map(
-                    fn ($object) => $object->name,
-                    $data->objects
-                );
+                $next = $page['nextStartWith'];
+                $advance = $next !== null && $next !== $start;
+                $start = $next;
+            } while ($advance);
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToDeleteDirectory::atLocation($path, $exception->getMessage(), $exception);
+        }
 
-                // Add directory placeholder itself if it exists (will be ignored if not)
-                $objectPaths[] = $dirPath;
-
-                // Use bulk delete to remove all objects in a single API call
-                $result = $this->client->bulkDelete($objectPaths);
-
-                // Log any errors that occurred during bulk deletion
-                if (! empty($result['errors']) && class_exists('\Illuminate\Support\Facades\Log')) {
-                    Log::warning(
-                        'Some files could not be deleted during directory removal',
-                        ['errors' => $result['errors'], 'directory' => $dirPath]
-                    );
-                }
-            }
-        } catch (GuzzleException $exception) {
-            throw new RuntimeException(
-                sprintf('Error during directory deletion: %s', $exception->getMessage()),
-                $exception->getCode(),
-                $exception
-            );
+        if ($failed !== []) {
+            throw UnableToDeleteDirectory::atLocation($path, 'failed to delete: '.implode(', ', array_slice($failed, 0, 20)));
         }
     }
 
@@ -270,7 +270,19 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function createDirectory(string $path, Config $config): void
     {
-        $this->write($path, '', $config);
+        $prefixed = rtrim($this->client->getPrefixedPath($path), '/');
+
+        try {
+            ResponseGuard::ok($this->client->send(
+                $this->client->getObjectUri($prefixed === '' ? '/' : $prefixed.'/'),
+                'PUT',
+                ['Content-Length' => '0'],
+                '',
+                'application/x-directory',
+            ), 'createDirectory');
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToCreateDirectory::atLocation($path, $exception->getMessage(), $exception);
+        }
     }
 
     /**
@@ -528,99 +540,83 @@ final readonly class OciAdapter implements FilesystemAdapter
     }
 
     /**
-     * List contents of a directory
+     * List contents of a directory, following OCI's pagination lazily.
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/ListObjects
      *
      * @param  string  $path  Directory path
      * @param  bool  $deep  Whether to recurse into subdirectories
-     * @return iterable<FileAttributes> List of file attributes
+     * @return iterable<StorageAttributes>
      *
      * @throws UnableToListContents
      */
     public function listContents(string $path, bool $deep): iterable
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $prefix = rtrim($prefixedPath, '/');
-        $prefix = ! empty($prefix) ? $prefix.'/' : '';
+        $fullPrefix = $this->directoryPrefix($path);
         $delimiter = $deep ? null : '/';
+        $yieldedDirectories = [];
+        $start = null;
 
-        try {
-            // Use the client's listObjects method for better error handling and pagination
-            $result = $this->client->listObjects([
-                'prefix' => $prefix,
-                'delimiter' => $delimiter,
-                // Use a reasonable limit to prevent memory issues
-                'limit' => 1000,
-            ]);
+        do {
+            try {
+                $page = $this->client->listObjectsPage($fullPrefix, $delimiter, $start, self::LIST_PAGE_SIZE);
+            } catch (OciRequestFailed|GuzzleException $exception) {
+                throw UnableToListContents::atLocation($path, $deep, $exception);
+            }
 
-            // Convert to FileAttributes collection
-            $files = collect();
+            foreach ($page['objects'] as $object) {
+                $name = (string) ($object['name'] ?? '');
 
-            // Process regular objects
-            foreach ($result['objects'] ?? [] as $object) {
-                // Skip the directory placeholder itself when listing
-                if ($object['name'] === $prefix && ! empty($prefix)) {
+                if ($name === '' || $name === $fullPrefix) {
                     continue;
                 }
 
-                // For non-recursive listing, skip nested objects
-                if (
-                    ! $deep && ! empty($prefix) &&
-                    str_contains(substr($object['name'], strlen($prefix)), '/')
-                ) {
+                if (str_ends_with($name, '/')) {
+                    $directory = rtrim($this->client->removePrefixFromPath($name), '/');
+                    if (! isset($yieldedDirectories[$directory])) {
+                        $yieldedDirectories[$directory] = true;
+
+                        yield new DirectoryAttributes($directory);
+                    }
+
                     continue;
                 }
 
-                // Extract file metadata
-                $fileSize = $object['size'] ?? null;
-                $lastModified = null;
-                if (isset($object['timeModified'])) {
-                    $timestamp = strtotime($object['timeModified']);
-                    $lastModified = $timestamp !== false ? $timestamp : null;
-                }
-                $mimeType = $object['contentType'] ?? null;
-
-                // Determine if it's a directory by checking for trailing slash
-                $isDirectory = str_ends_with($object['name'], '/');
-
-                $files->push(
-                    new FileAttributes(
-                        path: $object['name'],
-                        fileSize: $isDirectory ? null : (int) $fileSize,
-                        visibility: null,
-                        lastModified: $lastModified,
-                        mimeType: $mimeType,
-                        extraMetadata: [
-                            'type' => $isDirectory ? 'dir' : 'file',
-                            'etag' => $object['etag'] ?? null,
-                            'md5' => $object['md5'] ?? null,
-                            'storage_tier' => $object['storageTier'] ?? null,
-                        ]
-                    )
+                yield new FileAttributes(
+                    $this->client->removePrefixFromPath($name),
+                    isset($object['size']) ? (int) $object['size'] : null,
+                    null,
+                    isset($object['timeModified']) ? $this->toTimestamp((string) $object['timeModified']) : null,
+                    null,
+                    [
+                        'etag' => $object['etag'] ?? null,
+                        'md5' => $object['md5'] ?? null,
+                        'storage_tier' => $object['storageTier'] ?? null,
+                    ],
                 );
             }
 
-            // If not recursive, also process prefixes (directories)
-            if (! $deep && isset($result['prefixes'])) {
-                foreach ($result['prefixes'] as $dirPrefix) {
-                    $files->push(
-                        new FileAttributes(
-                            path: $dirPrefix,
-                            fileSize: null,
-                            visibility: null,
-                            lastModified: null,
-                            mimeType: null,
-                            extraMetadata: ['type' => 'dir']
-                        )
-                    );
+            foreach ($page['prefixes'] as $prefix) {
+                $directory = rtrim($this->client->removePrefixFromPath($prefix), '/');
+                if ($directory !== '' && ! isset($yieldedDirectories[$directory])) {
+                    $yieldedDirectories[$directory] = true;
+
+                    yield new DirectoryAttributes($directory);
                 }
             }
 
-            return $files;
-        } catch (\Exception $exception) {
-            throw UnableToListContents::atLocation($path, $deep, $exception);
-        }
+            $next = $page['nextStartWith'];
+            // A repeated token would loop forever; treat it as the end of the listing.
+            $more = $next !== null && $next !== $start;
+            $start = $next;
+        } while ($more);
+    }
+
+    private function toTimestamp(string $time): ?int
+    {
+        $timestamp = strtotime($time);
+
+        return $timestamp === false ? null : $timestamp;
     }
 
     /**
