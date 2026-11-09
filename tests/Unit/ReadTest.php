@@ -1,5 +1,7 @@
 <?php
 
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
 use LaravelOCI\LaravelOciDriver\Tests\Support\FakeOci;
@@ -82,4 +84,16 @@ it('delete 500 throws UnableToDeleteFile', function () {
     $fake = FakeOci::make()->queue(new Response(500));
 
     expect(fn () => $fake->adapter()->delete('a'))->toThrow(UnableToDeleteFile::class);
+});
+
+it('delete directory probe failure keeps the previous exception', function () {
+    $previous = new ConnectException('down', new Request('GET', 'x'));
+    $fake = FakeOci::make()->queue($previous);
+
+    try {
+        $fake->adapter()->delete('dir/');
+        $this->fail('expected exception');
+    } catch (UnableToDeleteFile $e) {
+        expect($e->getPrevious())->toBe($previous);
+    }
 });
