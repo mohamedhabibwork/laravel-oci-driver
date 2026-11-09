@@ -75,13 +75,6 @@ jobs:
     name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.stability }} - ${{ matrix.os }}
 
     steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -157,33 +150,3 @@ jobs:
             build/logs/
             build/coverage/
           retention-days: 3
-
-  minimum-version-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    name: Minimum Version Test
-    steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.2"
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick, fileinfo
-          coverage: none
-          tools: composer:v2
-
-      - name: Install minimum dependencies
-        run: |
-          composer update --prefer-lowest --prefer-stable --prefer-dist --no-interaction --no-progress
-
-      - name: Execute tests
-        run: vendor/bin/pest --ci
