@@ -359,7 +359,6 @@ final readonly class OciConfig
             'tenancy_id',
             'user_id',
             'key_fingerprint',
-            'key_path',
             'namespace',
             'region',
             'bucket',
@@ -371,6 +370,13 @@ final readonly class OciConfig
             } catch (\InvalidArgumentException $e) {
                 $errors[] = $e->getMessage();
             }
+        }
+
+        // Any one of the three key sources is enough
+        $keySources = ['private_key', 'private_key_base64', 'key_path'];
+        $hasKeySource = array_filter($keySources, fn (string $key): bool => ! $this->isBlank($this->get($key))) !== [];
+        if (! $hasKeySource) {
+            $errors[] = 'Missing required configuration: one of private_key, private_key_base64 or key_path';
         }
 
         // Validate fingerprint format
@@ -393,8 +399,8 @@ final readonly class OciConfig
             // Already handled above
         }
 
-        // Validate key path exists (skip in testing)
-        if (! $this->isTestingEnvironment()) {
+        // Validate key path exists (skip in testing, or when another key source is set)
+        if (! $this->isTestingEnvironment() && $this->isBlank($this->get('private_key')) && $this->isBlank($this->get('private_key_base64'))) {
             try {
                 $keyPath = $this->getKeyPath();
                 if (! file_exists($keyPath)) {
