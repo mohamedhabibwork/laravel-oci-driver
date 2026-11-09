@@ -121,3 +121,22 @@ it('getObjectInfo reads storage tier and opc-meta metadata', function () {
         ->and($info['size'])->toBe(3)
         ->and($info['metadata'])->toBe(['opc-meta-color' => 'red']);
 });
+
+it('setVisibility rejects unknown mapped tier without a request', function () {
+    $fake = FakeOci::make(['visibility_mapping' => ['public' => 'Archve']]);
+
+    expect(fn () => $fake->adapter()->setVisibility('a', 'public'))
+        ->toThrow(UnableToSetVisibility::class, "unknown storage tier 'Archve'");
+    expect($fake->requests())->toBeEmpty();
+});
+
+it('setVisibility wraps update failure with previous', function () {
+    $fake = FakeOci::make(visibilityMapping())->queue(new Response(500));
+
+    try {
+        $fake->adapter()->setVisibility('a', 'public');
+        $this->fail('expected exception');
+    } catch (UnableToSetVisibility $e) {
+        expect($e->getPrevious())->not->toBeNull();
+    }
+});

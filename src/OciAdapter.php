@@ -418,10 +418,19 @@ final readonly class OciAdapter implements FilesystemAdapter
             throw UnableToSetVisibility::atLocation($path, "Visibility '{$visibility}' is not present in visibility_mapping");
         }
 
+        $tier = StorageTier::tryFrom($mapping[$visibility]);
+
+        if ($tier === null) {
+            throw UnableToSetVisibility::atLocation(
+                $path,
+                "visibility_mapping maps '{$visibility}' to unknown storage tier '{$mapping[$visibility]}'"
+            );
+        }
+
         try {
-            $this->updateStorageTier($path, $mapping[$visibility]);
-        } catch (UnableToWriteFile $exception) {
-            throw UnableToSetVisibility::atLocation($path, $exception->reason(), $exception);
+            $this->updateStorageTier($path, $tier);
+        } catch (\Throwable $exception) {
+            throw UnableToSetVisibility::atLocation($path, $exception->getMessage(), $exception);
         }
     }
 
