@@ -904,4 +904,210 @@ $objects = $client->listPrefixedObjects([
     'limit' => 100,
     'prefix' => 'documents/', // Additional prefix within the main prefix
 ]);
-``` 
+```
+
+---
+
+## Best Practices
+
+### Error Handling
+
+Always implement proper error handling for file operations:
+
+```php
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+
+try {
+    $path = Storage::disk('oci')->put('documents/important.pdf', $content);
+    
+    if (!$path) {
+        throw new Exception('Failed to store file');
+    }
+    
+    Log::info('File uploaded successfully', ['path' => $path]);
+    
+} catch (Exception $e) {
+    Log::error('File upload failed', [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
+    ]);
+    
+    // Handle the error appropriately
+    return response()->json(['error' => 'Upload failed'], 500);
+}
+```
+
+### Performance Considerations
+
+```php
+// For large files, use streaming
+$stream = Storage::disk('oci')->readStream('large-file.zip');
+$response = Response::stream(function () use ($stream) {
+    fpassthru($stream);
+    fclose($stream);
+}, 200, [
+    'Content-Type' => 'application/zip',
+    'Content-Disposition' => 'attachment; filename="large-file.zip"'
+]);
+
+// For multiple files, use bulk operations
+$files = [
+    'document1.pdf' => $content1,
+    'document2.pdf' => $content2,
+    'document3.pdf' => $content3,
+];
+
+foreach ($files as $filename => $content) {
+    Storage::disk('oci')->put("batch/{$filename}", $content);
+}
+```
+
+### Security Best Practices
+
+```php
+// Validate file types before upload
+$allowedMimeTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+$mimeType = $uploadedFile->getMimeType();
+
+if (!in_array($mimeType, $allowedMimeTypes)) {
+    throw new InvalidArgumentException('File type not allowed');
+}
+
+// Sanitize file names
+$filename = preg_replace('/[^a-zA-Z0-9._-]/', '', $uploadedFile->getClientOriginalName());
+
+// Store in organized directory structure
+$path = Storage::disk('oci')->putFileAs(
+    'uploads/' . auth()->id() . '/' . date('Y/m'),
+    $uploadedFile,
+    $filename
+);
+```
+
+---
+
+## Common Patterns
+
+### File Upload with Progress Tracking
+
+```php
+class FileUploadService
+{
+    public function uploadWithProgress($file, $callback = null)
+    {
+        $totalSize = $file->getSize();
+        $uploadedSize = 0;
+        
+        // For large files, implement chunked upload
+        if ($totalSize > 100 * 1024 * 1024) { // 100MB
+            return $this->chunkedUpload($file, $callback);
+        }
+        
+        $path = Storage::disk('oci')->putFile('uploads', $file);
+        
+        if ($callback) {
+            $callback(100, $totalSize, $totalSize);
+        }
+        
+        return $path;
+    }
+    
+    private function chunkedUpload($file, $callback)
+    {
+        // Implementation for chunked upload
+        // This would depend on your specific requirements
+    }
+}
+```
+
+### File Versioning
+
+```php
+class FileVersioningService
+{
+    public function uploadNewVersion($originalPath, $newContent)
+    {
+        $info = pathinfo($originalPath);
+        $timestamp = now()->format('Y-m-d_H-i-s');
+        
+        // Create version path
+        $versionPath = "{$info['dirname']}/versions/{$info['filename']}_{$timestamp}.{$info['extension']}";
+        
+        // Store the new version
+        Storage::disk('oci')->put($versionPath, $newContent);
+        
+        // Update the main file
+        Storage::disk('oci')->put($originalPath, $newContent);
+        
+        return [
+            'current' => $originalPath,
+            'version' => $versionPath
+        ];
+    }
+    
+    public function getVersions($filePath)
+    {
+        $info = pathinfo($filePath);
+        $versionDir = "{$info['dirname']}/versions";
+        
+        $versions = Storage::disk('oci')->files($versionDir);
+        
+        return collect($versions)
+            ->filter(function ($version) use ($info) {
+                return str_contains($version, $info['filename']);
+            })
+            ->sort()
+            ->values()
+            ->toArray();
+    }
+}
+```
+
+### File Metadata Management
+
+```php
+class FileMetadataService
+{
+    public function storeWithMetadata($file, $metadata = [])
+    {
+        $path = Storage::disk('oci')->putFile('uploads', $file);
+        
+        $fileMetadata = array_merge([
+            'original_name' => $file->getClientOriginalName(),
+            'mime_type' => $file->getMimeType(),
+            'size' => $file->getSize(),
+            'uploaded_by' => auth()->id(),
+            'uploaded_at' => now()->toISOString(),
+        ], $metadata);
+        
+        // Store metadata alongside the file
+        $metadataPath = $path . '.metadata.json';
+        Storage::disk('oci')->put($metadataPath, json_encode($fileMetadata));
+        
+        return $path;
+    }
+    
+    public function getMetadata($filePath)
+    {
+        $metadataPath = $filePath . '.metadata.json';
+        
+        if (!Storage::disk('oci')->exists($metadataPath)) {
+            return null;
+        }
+        
+        $metadataJson = Storage::disk('oci')->get($metadataPath);
+        return json_decode($metadataJson, true);
+    }
+}
+```
+
+---
+
+## References
+
+- [Configuration Guide](CONFIGURATION.md)
+- [API Reference](API_REFERENCE.md)
+- [Performance Guide](PERFORMANCE.md)
+- [Security Guide](SECURITY.md)
+- [Advanced Features](ADVANCED.md) 

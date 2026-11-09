@@ -934,17 +934,154 @@ protected $listen = [
 
 For more examples and detailed usage instructions, see the main [README](../README.md) and other documentation files.
 
-## 🗺️ Roadmap
+---
 
-See the [README](../README.md) for the most up-to-date roadmap and planned features.
+## Error Handling
 
-- [ ] Advanced Health Checks (Spatie Health integration)
-- [ ] Connection Pooling and advanced parallel/multipart upload support
-- [ ] Custom Event Listeners for all storage operations
-- [ ] Improved Error Reporting and user-friendly CLI output
-- [ ] Web UI for Connection Management
-- [ ] More Key Providers (e.g., HashiCorp Vault, AWS Secrets Manager)
-- [ ] Automatic Key Rotation
-- [ ] Enhanced Documentation & Examples
-- [ ] Support for Additional OCI Services (beyond Object Storage)
-- [ ] Performance Benchmarks and Tuning Guides
+### Common Exceptions
+
+The Laravel OCI Driver throws specific exceptions for different error conditions:
+
+```php
+use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
+use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
+use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
+
+try {
+    $result = Storage::disk('oci')->put('file.txt', 'content');
+} catch (PrivateKeyFileNotFoundException $e) {
+    // Private key file not found or not readable
+    Log::error('Private key file issue: ' . $e->getMessage());
+} catch (SignerValidateException $e) {
+    // Configuration validation failed
+    Log::error('Signer validation failed: ' . $e->getMessage());
+} catch (SigningValidationFailedException $e) {
+    // Request signing failed
+    Log::error('Signing validation failed: ' . $e->getMessage());
+} catch (Exception $e) {
+    // General error handling
+    Log::error('OCI operation failed: ' . $e->getMessage());
+}
+```
+
+### Error Recovery
+
+```php
+use Illuminate\Support\Facades\Storage;
+use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
+
+// Retry failed operations, but do not retry configuration errors
+$result = retry(3, function () {
+    return Storage::disk('oci')->put('important-file.txt', 'content');
+}, 1000, function ($exception) {
+    return !($exception instanceof SignerValidateException);
+});
+```
+
+---
+
+## Configuration Reference
+
+For complete configuration options, see the [Configuration Guide](CONFIGURATION.md).
+
+### Required Configuration
+
+```php
+'oci' => [
+    'driver' => 'oci',
+    'namespace' => env('OCI_NAMESPACE'),
+    'region' => env('OCI_REGION'),
+    'bucket' => env('OCI_BUCKET'),
+    'tenancy_id' => env('OCI_TENANCY_OCID'),
+    'user_id' => env('OCI_USER_OCID'),
+    'key_fingerprint' => env('OCI_FINGERPRINT'),
+    'key_path' => env('OCI_PRIVATE_KEY_PATH'),
+],
+```
+
+### Optional Configuration
+
+```php
+'oci' => [
+    // ... required config
+    'storage_tier' => env('OCI_STORAGE_TIER', 'Standard'),
+    'url_path_prefix' => env('OCI_PREFIX', ''),
+    'passphrase' => env('OCI_PASSPHRASE'),
+    'visibility' => 'private',
+    'debug' => env('OCI_DEBUG', false),
+    'log_level' => env('OCI_LOG_LEVEL', 'info'),
+],
+```
+
+---
+
+## Performance Considerations
+
+### Large File Handling
+
+For files larger than 100MB, consider using streaming operations:
+
+```php
+// Stream large file downloads
+$stream = Storage::disk('oci')->readStream('large-file.zip');
+
+return response()->stream(function () use ($stream) {
+    fpassthru($stream);
+    if (is_resource($stream)) {
+        fclose($stream);
+    }
+}, 200, [
+    'Content-Type' => 'application/zip',
+    'Content-Disposition' => 'attachment; filename="large-file.zip"',
+]);
+```
+
+### Batch Operations
+
+```php
+// Process multiple files efficiently
+$files = ['file1.txt', 'file2.txt', 'file3.txt'];
+$results = [];
+
+foreach ($files as $file) {
+    try {
+        $results[$file] = Storage::disk('oci')->get($file);
+    } catch (Exception $e) {
+        Log::warning("Failed to process {$file}: " . $e->getMessage());
+        $results[$file] = null;
+    }
+}
+```
+
+---
+
+## Testing
+
+For testing strategies and examples, see the [Testing Guide](TESTING.md).
+
+### Mocking in Tests
+
+```php
+use Illuminate\Support\Facades\Storage;
+
+// In your test
+Storage::fake('oci');
+
+// Your application code
+Storage::disk('oci')->put('test-file.txt', 'test content');
+
+// Assert file was stored
+Storage::disk('oci')->assertExists('test-file.txt');
+```
+
+---
+
+## References
+
+- [Configuration Guide](CONFIGURATION.md) - Complete configuration reference
+- [Usage Examples](EXAMPLES.md) - Practical code examples
+- [Testing Guide](TESTING.md) - Testing strategies and examples
+- [Performance Guide](PERFORMANCE.md) - Optimization and tuning
+- [Security Guide](SECURITY.md) - Security best practices
+- [Troubleshooting Guide](TROUBLESHOOTING.md) - Common issues and solutions
+- [Advanced Features](ADVANCED.md) - Advanced usage patterns
