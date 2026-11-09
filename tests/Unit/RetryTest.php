@@ -9,6 +9,9 @@ use LaravelOCI\LaravelOciDriver\Tests\Support\FakeOci;
 
 const RETRY_URI = 'https://objectstorage.me-jeddah-1.oraclecloud.com/n/ns/b/bkt/o/a';
 
+/**
+ * @param  array<string, mixed>  $overrides
+ */
 function retryFake(array $overrides = []): FakeOci
 {
     return FakeOci::make(array_merge(['retry_attempts' => 3, 'retry_delay' => 0], $overrides));

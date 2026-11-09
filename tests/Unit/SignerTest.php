@@ -35,7 +35,7 @@ function parseAuthorization(array $headers): array
             preg_match('/headers="([^"]+)"/', $line, $h);
             preg_match('/signature="([^"]+)"/', $line, $s);
 
-            return ['headers' => explode(' ', $h[1]), 'signature' => $s[1]];
+            return ['headers' => explode(' ', $h[1] ?? ''), 'signature' => $s[1] ?? ''];
         }
     }
 
@@ -97,7 +97,7 @@ it('signature verifies', function () {
     $auth = parseAuthorization($signer->getHeaders(SIGNER_URL, 'GET', null, 'application/json', SIGNER_DATE));
     $signingString = $signer->getSigningString(SIGNER_URL, 'GET', null, 'application/json', SIGNER_DATE);
 
-    expect(openssl_verify($signingString, base64_decode($auth['signature']), file_get_contents(dirname(__DIR__).'/fixtures/test-key.pub'), OPENSSL_ALGO_SHA256))->toBe(1);
+    expect(openssl_verify($signingString, (string) base64_decode($auth['signature']), (string) file_get_contents(dirname(__DIR__).'/fixtures/test-key.pub'), OPENSSL_ALGO_SHA256))->toBe(1);
 });
 
 it('fromConfig reads private_key_base64', function () {
@@ -105,12 +105,12 @@ it('fromConfig reads private_key_base64', function () {
         'tenancy_id' => 'ten',
         'user_id' => 'usr',
         'key_fingerprint' => 'fp',
-        'private_key_base64' => base64_encode(file_get_contents(signerKeyPath())),
+        'private_key_base64' => base64_encode((string) file_get_contents(signerKeyPath())),
     ]);
     $auth = parseAuthorization($signer->getHeaders(SIGNER_URL, 'GET', null, 'application/json', SIGNER_DATE));
     $signingString = $signer->getSigningString(SIGNER_URL, 'GET', null, 'application/json', SIGNER_DATE);
 
-    expect(openssl_verify($signingString, base64_decode($auth['signature']), file_get_contents(dirname(__DIR__).'/fixtures/test-key.pub'), OPENSSL_ALGO_SHA256))->toBe(1);
+    expect(openssl_verify($signingString, (string) base64_decode($auth['signature']), (string) file_get_contents(dirname(__DIR__).'/fixtures/test-key.pub'), OPENSSL_ALGO_SHA256))->toBe(1);
 });
 
 it('fromConfig prefers private_key over key_path', function () {

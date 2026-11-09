@@ -378,13 +378,13 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     private function remainingSize($resource): ?int
     {
-        if (! (stream_get_meta_data($resource)['seekable'] ?? false)) {
+        if (! stream_get_meta_data($resource)['seekable']) {
             return null;
         }
 
         $stat = fstat($resource);
         $position = ftell($resource);
-        if ($stat === false || $position === false || ! isset($stat['size'])) {
+        if ($stat === false || $position === false) {
             return null;
         }
 
@@ -530,7 +530,7 @@ final readonly class OciAdapter implements FilesystemAdapter
             if (! $response->hasHeader('last-modified')) {
                 throw new RuntimeException('Missing Last-Modified header.');
             }
-            $lastModified = Carbon::parse($response->getHeaderLine('last-modified'))->timestamp;
+            $lastModified = Carbon::parse($response->getHeaderLine('last-modified'))->getTimestamp();
 
             return new FileAttributes(path: $path, lastModified: $lastModified);
         } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {

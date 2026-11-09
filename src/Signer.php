@@ -141,6 +141,9 @@ final class Signer
 
         // verify
         $details = openssl_pkey_get_details($privateKeyId);
+        if ($details === false) {
+            throw new SigningValidationFailedException('Unable to read public key details from the private key.');
+        }
         $public_key_pem = $details['key'];
         $r = openssl_verify($signingString, $binarySignature, $public_key_pem, 'sha256WithRSAEncryption');
         if ($r !== 1) {
@@ -280,7 +283,7 @@ final class Signer
                     break;
                 case self::SIGNING_HEADER_CONTENT_LENGTH:
                     $contentLength = $this->getContentLength($body);
-                    $headersMap[self::SIGNING_HEADER_CONTENT_LENGTH] = $contentLength;
+                    $headersMap[self::SIGNING_HEADER_CONTENT_LENGTH] = (string) $contentLength;
                     break;
                 case self::SIGNING_HEADER_CONTENT_TYPE:
                     $headersMap[self::SIGNING_HEADER_CONTENT_TYPE] = $contentType ?? '';
@@ -322,7 +325,6 @@ final class Signer
     }
 
     /**
-     * @throws PrivateKeyFileNotFoundException
      * @throws SignerValidateException
      */
     private function validateParameters(string $url): void

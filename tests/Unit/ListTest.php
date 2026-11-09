@@ -8,6 +8,9 @@ use League\Flysystem\FileAttributes;
 use League\Flysystem\UnableToListContents;
 use Psr\Http\Message\RequestInterface;
 
+/**
+ * @return array<int|string, mixed>
+ */
 function queryOf(RequestInterface $request): array
 {
     parse_str($request->getUri()->getQuery(), $query);

@@ -201,7 +201,8 @@ final class OciConfigCommand extends Command
     {
         $this->info('🔍 Validating OCI Configuration');
 
-        $disk = (string) $this->option('disk');
+        $diskOption = $this->option('disk');
+        $disk = is_string($diskOption) && $diskOption !== '' ? $diskOption : 'oci';
         $diskConfig = config("filesystems.disks.{$disk}");
 
         if (! is_array($diskConfig) || ($diskConfig['driver'] ?? null) !== 'oci') {

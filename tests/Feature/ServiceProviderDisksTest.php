@@ -70,7 +70,7 @@ test('chunk size has a 10 MiB floor', function () {
 });
 
 test('a disk with only private_key_base64 builds', function () {
-    $pem = file_get_contents(__DIR__.'/../fixtures/test-key.pem');
+    $pem = (string) file_get_contents(__DIR__.'/../fixtures/test-key.pem');
     $config = ociDiskConfig(['private_key_base64' => base64_encode($pem)]);
     unset($config['key_path'], $config['storage_tier']);
     config()->set('filesystems.disks.b64', $config);

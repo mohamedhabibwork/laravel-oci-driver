@@ -31,12 +31,16 @@ function fakeOciDisk(FakeOci $fake): FilesystemAdapter
     $adapter = $fake->adapter();
     $disk = new FilesystemAdapter(new Filesystem($adapter), $adapter, []);
     $provider = app()->getProvider(LaravelOciDriverServiceProvider::class);
+    assert($provider instanceof LaravelOciDriverServiceProvider);
     (new ReflectionMethod($provider, 'configureTemporaryUrls'))->invoke($provider, $disk, $fake->client());
     Storage::set('oci', $disk);
 
     return $disk;
 }
 
+/**
+ * @return array<string, mixed>
+ */
 function parBody(FakeOci $fake): array
 {
     return json_decode((string) $fake->lastRequest()->getBody(), true);

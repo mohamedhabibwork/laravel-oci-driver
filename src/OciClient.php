@@ -31,6 +31,8 @@ final readonly class OciClient
 
     /**
      * OCI client configuration.
+     *
+     * @param  array<string, mixed>  $config
      */
     private function __construct(
         private array $config,
@@ -69,6 +71,8 @@ final readonly class OciClient
 
     /**
      * Validate the configuration array.
+     *
+     * @param  array<string, mixed>  $config
      *
      * @throws \InvalidArgumentException When configuration is invalid
      */
@@ -319,6 +323,8 @@ final readonly class OciClient
     /**
      * Get the authorization headers for a request.
      *
+     * @return array<string, string>
+     *
      * @throws PrivateKeyFileNotFoundException
      * @throws SignerValidateException
      * @throws SigningValidationFailedException
@@ -327,7 +333,7 @@ final readonly class OciClient
         string $uri,
         string $method,
         ?string $body = null,
-        string $contentType = 'application/json',
+        ?string $contentType = 'application/json',
         bool $excludeBodyHeaders = false
     ): array {
         $headers = [];

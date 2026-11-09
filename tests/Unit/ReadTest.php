@@ -22,7 +22,7 @@ it('fileExists returns true, false, and throws', function () {
         $this->fail('expected exception');
     } catch (UnableToCheckExistence $e) {
         expect($e->getPrevious())->toBeInstanceOf(OciRequestFailed::class)
-            ->and($e->getPrevious()->status)->toBe(500);
+            ->and($e->getPrevious()?->status)->toBe(500);
     }
 });
 

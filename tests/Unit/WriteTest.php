@@ -7,9 +7,13 @@ use LaravelOCI\LaravelOciDriver\Tests\Support\FakeOci;
 use League\Flysystem\Config;
 use League\Flysystem\UnableToWriteFile;
 
+/**
+ * @return resource
+ */
 function tempResource(string $contents)
 {
     $h = fopen('php://temp', 'w+');
+    assert($h !== false);
     fwrite($h, $contents);
     rewind($h);
 
@@ -129,6 +133,7 @@ it('unknown size stream goes multipart', function () {
         new Response(200),
     );
     $pipe = popen('printf abc', 'r');
+    assert($pipe !== false);
 
     $fake->adapter()->writeStream('p.bin', $pipe, new Config);
 

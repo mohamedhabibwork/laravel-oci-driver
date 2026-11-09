@@ -26,7 +26,8 @@ final class OciParPruneCommand extends Command
 
     public function handle(): int
     {
-        $disk = (string) $this->argument('disk');
+        $diskArgument = $this->argument('disk');
+        $disk = is_string($diskArgument) && $diskArgument !== '' ? $diskArgument : 'oci';
         $adapter = Storage::disk($disk)->getAdapter();
 
         if (! $adapter instanceof OciAdapter) {

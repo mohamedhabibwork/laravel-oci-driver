@@ -19,6 +19,7 @@ final class FakeOci
     private MockHandler $mock;
 
     /** @var array<int, array{request: RequestInterface, response: ?ResponseInterface, options: array<string, mixed>}> */
+    /** @var array<int, array{request: RequestInterface, response: ResponseInterface|null, options: array<string, mixed>}> */
     private array $history = [];
 
     private OciClient $client;
@@ -87,7 +88,7 @@ final class FakeOci
     }
 
     /**
-     * @param  array<string, mixed>  $body
+     * @param  array<mixed>  $body
      * @param  array<string, string|list<string>>  $headers
      */
     public static function json(int $status, array $body, array $headers = []): Response
@@ -104,15 +105,18 @@ final class FakeOci
      */
     public function requests(): array
     {
-        return array_map(fn (array $entry): RequestInterface => $entry['request'], $this->history);
+        return array_values(array_map(fn (array $entry): RequestInterface => $entry['request'], $this->history));
     }
 
     public function lastRequest(): RequestInterface
     {
         $requests = $this->requests();
 
-        return $requests[array_key_last($requests)]
-            ?? throw new \LogicException('No requests were recorded.');
+        if ($requests === []) {
+            throw new \LogicException('No requests were recorded.');
+        }
+
+        return $requests[array_key_last($requests)];
     }
 
     /**

@@ -7,6 +7,9 @@ use League\Flysystem\UnableToRetrieveMetadata;
 use League\Flysystem\UnableToSetVisibility;
 use League\Flysystem\UnableToWriteFile;
 
+/**
+ * @return array<string, array<string, string>>
+ */
 function visibilityMapping(): array
 {
     return ['visibility_mapping' => ['public' => 'Standard', 'private' => 'InfrequentAccess']];
@@ -116,6 +119,7 @@ it('getObjectInfo reads storage tier and opc-meta metadata', function () {
     ]));
 
     $info = $fake->client()->getObjectInfo('a');
+    assert($info !== null);
 
     expect($info['storage_tier'])->toBe('Archive')
         ->and($info['size'])->toBe(3)

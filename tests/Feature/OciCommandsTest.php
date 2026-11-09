@@ -13,6 +13,7 @@ use LaravelOCI\LaravelOciDriver\Tests\TestCase;
 final class OciCommandsTest extends TestCase
 {
     /**
+     * @param  array<string, mixed>  $overrides
      * @return array<string, mixed>
      */
     private function diskConfig(array $overrides = []): array

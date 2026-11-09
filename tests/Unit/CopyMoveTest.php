@@ -65,7 +65,7 @@ it('copy times out', function () {
         $fake->adapter()->copy('a', 'b', new Config);
         $this->fail('expected exception');
     } catch (UnableToCopyFile $e) {
-        expect($e->getPrevious()->getMessage())->toContain('timed out')
+        expect($e->getPrevious()?->getMessage())->toContain('timed out')
             ->and($fake->requests())->toHaveCount(2);
     }
 });
