@@ -469,7 +469,7 @@ final readonly class OciClient
      */
     public function updateObjectStorageTier(string $path, StorageTier $storageTier): bool
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), urlencode($this->applyPathPrefix($path)));
+        $uri = sprintf('%s/o/%s', $this->getBucketUri(), rawurlencode($this->applyPathPrefix($path)));
 
         try {
             $response = $this->send(
@@ -497,7 +497,7 @@ final readonly class OciClient
      */
     public function getObjectInfo(string $path): ?array
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), urlencode($this->applyPathPrefix($path)));
+        $uri = sprintf('%s/o/%s', $this->getBucketUri(), rawurlencode($this->applyPathPrefix($path)));
 
         try {
             $response = $this->send($uri, 'HEAD');

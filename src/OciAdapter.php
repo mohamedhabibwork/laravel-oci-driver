@@ -52,7 +52,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     private function exists(string $path): bool
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -86,7 +86,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function writeStream(string $path, $contents, Config $config): void
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         $body = stream_get_contents($contents);
         $mime = finfo_buffer(finfo_open(FILEINFO_MIME_TYPE), $body);
@@ -119,7 +119,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function read(string $path): string
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'GET');
@@ -145,7 +145,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function readStream(string $path)
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'GET');
@@ -262,7 +262,7 @@ final readonly class OciAdapter implements FilesystemAdapter
         }
 
         // Otherwise, proceed with single file deletion
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'DELETE');
@@ -305,7 +305,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function write(string $path, string $contents, Config $config): void
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             // Determine content type
@@ -498,7 +498,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function mimeType(string $path): FileAttributes
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -527,7 +527,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function lastModified(string $path): FileAttributes
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -556,7 +556,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function fileSize(string $path): FileAttributes
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), urlencode($prefixedPath));
+        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
