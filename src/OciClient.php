@@ -401,34 +401,45 @@ final readonly class OciClient
      *
      * @param  string  $sourcePath  Source object path
      * @param  string  $destinationPath  Destination object path
-     * @return bool True if successful, false otherwise
-     *
-     * @throws GuzzleException
+     * @return bool True if successful, false otherwise (including transport errors)
      */
     public function renameObject(string $sourcePath, string $destinationPath): bool
     {
-        $uri = sprintf('%s/actions/renameObject', $this->getBucketUri());
-
-        $bodyData = [
-            'sourceName' => $this->applyPathPrefix($sourcePath),
-            'destinationName' => $this->applyPathPrefix($destinationPath),
-        ];
-
-        $body = json_encode($bodyData);
-        if ($body === false) {
-            throw new \RuntimeException('Failed to encode request body to JSON');
-        }
-
         try {
-            $response = $this->send($uri, 'POST', [], $body);
+            $response = $this->send(
+                $this->renameObjectUri(),
+                'POST',
+                [],
+                $this->renameObjectBody($sourcePath, $destinationPath),
+            );
 
             return $response->getStatusCode() === 200;
-        } catch (GuzzleException $exception) {
-            if ($exception->getCode() === 404) {
-                return false; // Source object not found
-            }
-            throw $exception;
+        } catch (GuzzleException) {
+            return false;
         }
+    }
+
+    /**
+     * URI of the renameObject action.
+     *
+     * @internal
+     */
+    public function renameObjectUri(): string
+    {
+        return sprintf('%s/actions/renameObject', $this->getBucketUri());
+    }
+
+    /**
+     * JSON body of a renameObject request (names are prefixed idempotently).
+     *
+     * @internal
+     */
+    public function renameObjectBody(string $sourcePath, string $destinationPath): string
+    {
+        return json_encode([
+            'sourceName' => $this->applyPathPrefix($sourcePath),
+            'newName' => $this->applyPathPrefix($destinationPath),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 
     /**

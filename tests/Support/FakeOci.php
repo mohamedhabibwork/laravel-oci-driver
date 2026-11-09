@@ -74,7 +74,7 @@ final class FakeOci
 
     public function adapter(): OciAdapter
     {
-        return new OciAdapter($this->client);
+        return new OciAdapter($this->client, static fn (int $microseconds) => null);
     }
 
     public function queue(ResponseInterface|\Throwable ...$responses): self

@@ -10,6 +10,7 @@ use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
 use LaravelOCI\LaravelOciDriver\Support\MultipartUploader;
 use LaravelOCI\LaravelOciDriver\Support\ResponseGuard;
+use LaravelOCI\LaravelOciDriver\Support\WorkRequestPoller;
 use League\Flysystem\Config;
 use League\Flysystem\DirectoryAttributes;
 use League\Flysystem\FileAttributes;
@@ -28,6 +29,7 @@ use League\Flysystem\UnableToSetVisibility;
 use League\Flysystem\UnableToWriteFile;
 use League\MimeTypeDetection\ExtensionMimeTypeDetector;
 use Psr\Http\Message\StreamInterface;
+use Ramsey\Uuid\Uuid;
 use RuntimeException;
 
 /**
@@ -37,10 +39,22 @@ final readonly class OciAdapter implements FilesystemAdapter
 {
     private const LIST_PAGE_SIZE = 1000;
 
+    private WorkRequestPoller $workRequestPoller;
+
     /**
      * @param  OciClient  $client  OCI client for API requests
+     * @param  ?\Closure  $sleep  Receives microseconds; replaces usleep while polling copy work requests (tests)
      */
-    public function __construct(private OciClient $client) {}
+    public function __construct(private OciClient $client, ?\Closure $sleep = null)
+    {
+        $ociConfig = $client->getOciConfig();
+        $this->workRequestPoller = new WorkRequestPoller(
+            $client,
+            (int) $ociConfig->get('copy_timeout', 300),
+            (int) $ociConfig->get('copy_poll_interval', 1000),
+            $sleep,
+        );
+    }
 
     /**
      * Check if a file exists at the given path
@@ -620,7 +634,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     }
 
     /**
-     * Move a file using the native OCI renameObject API
+     * Move a file using the native OCI renameObject API (atomic, no copy + delete fallback)
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/RenameObject
      *
@@ -632,35 +646,21 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function move(string $source, string $destination, Config $config): void
     {
-        $prefixedSource = $this->client->getPrefixedPath($source);
-        $prefixedDestination = $this->client->getPrefixedPath($destination);
         try {
-            $success = $this->client->renameObject($prefixedSource, $prefixedDestination);
-
-            if (! $success) {
-                throw UnableToMoveFile::because(
-                    'operation failed',
-                    $source,
-                    $destination
-                );
-            }
-        } catch (GuzzleException $exception) {
-            // Fall back to copy + delete if rename fails
-            try {
-                $this->copy($prefixedSource, $prefixedDestination, $config);
-                $this->delete($prefixedSource);
-            } catch (\Exception $e) {
-                throw UnableToMoveFile::fromLocationTo(
-                    $source,
-                    $destination,
-                    $e
-                );
-            }
+            $response = $this->client->send(
+                $this->client->renameObjectUri(),
+                'POST',
+                [],
+                $this->client->renameObjectBody($source, $destination),
+            );
+            ResponseGuard::ok($response, 'rename object');
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToMoveFile::fromLocationTo($source, $destination, $exception);
         }
     }
 
     /**
-     * Copy a file
+     * Copy a file using the asynchronous OCI copyObject API, waiting for its work request to finish
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/CopyObject
      *
@@ -672,42 +672,43 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function copy(string $source, string $destination, Config $config): void
     {
-        $prefixedSource = $this->client->getPrefixedPath($source);
-        $prefixedDestination = $this->client->getPrefixedPath($destination);
         $uri = sprintf('%s/actions/copyObject', $this->client->getBucketUri());
 
-        // Extract any custom storage tier or content-type from config
-        $destinationStorageTier = $config->get('storage_tier', $this->client->getStorageTier()->value());
-        $contentType = $config->get('content_type');
-
-        $body = json_encode([
-            'sourceObjectName' => $prefixedSource,
+        $payload = [
+            'sourceObjectName' => $this->client->getPrefixedPath($source),
             'destinationRegion' => $this->client->getRegion(),
             'destinationNamespace' => $this->client->getNamespace(),
             'destinationBucket' => $this->client->getBucket(),
-            'destinationObjectName' => $prefixedDestination,
-            'destinationStorageTier' => $destinationStorageTier,
-            // Include metadata directives and content-type if specified
-            ...($contentType ? ['contentType' => $contentType] : []),
-            ...($config->get('metadata') ? ['metadata' => $config->get('metadata')] : []),
-        ]);
+            'destinationObjectName' => $this->client->getPrefixedPath($destination),
+        ];
+
+        $metadata = $config->get('metadata');
+        if (is_array($metadata) && $metadata !== []) {
+            $payload['destinationObjectMetadata'] = $metadata;
+        }
+
+        $tier = $config->get('storage_tier');
+        if (is_string($tier) && $tier !== '') {
+            $payload['destinationObjectStorageTier'] = $tier;
+        }
 
         try {
-            $response = $this->client->send($uri, 'POST', [], $body);
-
-            if ($response->getStatusCode() !== 200) {
-                throw UnableToCopyFile::fromLocationTo(
-                    $source,
-                    $destination,
-                    new RuntimeException("HTTP {$response->getStatusCode()}")
-                );
-            }
-        } catch (GuzzleException $exception) {
-            throw UnableToCopyFile::fromLocationTo(
-                $source,
-                $destination,
-                $exception
+            $response = $this->client->send(
+                $uri,
+                'POST',
+                ['opc-retry-token' => Uuid::uuid4()->toString()],
+                json_encode($payload, JSON_THROW_ON_ERROR),
             );
+            ResponseGuard::ok($response, 'copy object', 202);
+
+            $workRequestId = $response->getHeaderLine('opc-work-request-id');
+            if ($workRequestId === '') {
+                throw new RuntimeException('copy object response is missing opc-work-request-id');
+            }
+
+            $this->workRequestPoller->wait($workRequestId);
+        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+            throw UnableToCopyFile::fromLocationTo($source, $destination, $exception);
         }
     }
 
