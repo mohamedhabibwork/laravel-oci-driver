@@ -4,12 +4,23 @@ namespace LaravelOCI\LaravelOciDriver;
 
 use Carbon\Carbon;
 use GuzzleHttp\Exception\GuzzleException;
+use Illuminate\Support\Facades\Log;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
+use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
+use LaravelOCI\LaravelOciDriver\Support\ResponseGuard;
 use League\Flysystem\Config;
 use League\Flysystem\FileAttributes;
 use League\Flysystem\FilesystemAdapter;
+use League\Flysystem\UnableToCheckExistence;
+use League\Flysystem\UnableToCopyFile;
+use League\Flysystem\UnableToDeleteFile;
+use League\Flysystem\UnableToListContents;
+use League\Flysystem\UnableToMoveFile;
 use League\Flysystem\UnableToReadFile;
+use League\Flysystem\UnableToRetrieveMetadata;
+use League\Flysystem\UnableToSetVisibility;
 use League\Flysystem\UnableToWriteFile;
+use RuntimeException;
 
 /**
  * Oracle Cloud Infrastructure Object Storage Adapter for Laravel Flysystem
@@ -51,8 +62,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     private function exists(string $path): bool
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
 
         try {
             $response = $this->client->send($uri, 'HEAD');
@@ -60,17 +70,10 @@ final readonly class OciAdapter implements FilesystemAdapter
             return match ($response->getStatusCode()) {
                 200 => true,
                 404 => false,
-                default => throw new UnableToReadFile(
-                    'Invalid response code: '.$response->getStatusCode(),
-                    $response->getStatusCode()
-                ),
+                default => throw OciRequestFailed::fromResponse($response, 'exists'),
             };
-        } catch (GuzzleException $exception) {
-            if ($exception->getCode() === 404) {
-                return false;
-            }
-
-            throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToCheckExistence::forLocation($path, $exception);
         }
     }
 
@@ -86,7 +89,7 @@ final readonly class OciAdapter implements FilesystemAdapter
     public function writeStream(string $path, $contents, Config $config): void
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($prefixedPath);
 
         $body = stream_get_contents($contents);
         $mime = finfo_buffer(finfo_open(FILEINFO_MIME_TYPE), $body);
@@ -118,19 +121,14 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function read(string $path): string
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
 
         try {
-            $response = $this->client->send($uri, 'GET');
+            $response = ResponseGuard::ok($this->client->send($uri, 'GET'), 'read');
 
-            if ($response->getStatusCode() === 200) {
-                return $response->getBody()->getContents();
-            }
-
-            throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
-        } catch (GuzzleException $exception) {
-            throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+            return $response->getBody()->getContents();
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
         }
     }
 
@@ -144,19 +142,22 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function readStream(string $path)
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
 
         try {
-            $response = $this->client->send($uri, 'GET');
+            $response = ResponseGuard::ok(
+                $this->client->send($uri, 'GET', options: ['stream' => true]),
+                'readStream',
+            );
 
-            if ($response->getStatusCode() === 200) {
-                return $response->getBody()->detach();
+            $resource = $response->getBody()->detach();
+            if ($resource === null) {
+                throw new RuntimeException('Response body could not be converted to a stream.');
             }
 
-            throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
-        } catch (GuzzleException $exception) {
-            throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+            return $resource;
+        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+            throw UnableToReadFile::fromLocation($path, $exception->getMessage(), $exception);
         }
     }
 
@@ -169,7 +170,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      *
      * @param  string  $path  Directory path
      *
-     * @throws \RuntimeException When unable to list or delete objects
+     * @throws RuntimeException When unable to list or delete objects
      */
     public function deleteDirectory(string $path): void
     {
@@ -206,14 +207,14 @@ final readonly class OciAdapter implements FilesystemAdapter
 
                 // Log any errors that occurred during bulk deletion
                 if (! empty($result['errors']) && class_exists('\Illuminate\Support\Facades\Log')) {
-                    \Illuminate\Support\Facades\Log::warning(
+                    Log::warning(
                         'Some files could not be deleted during directory removal',
                         ['errors' => $result['errors'], 'directory' => $dirPath]
                     );
                 }
             }
         } catch (GuzzleException $exception) {
-            throw new \RuntimeException(
+            throw new RuntimeException(
                 sprintf('Error during directory deletion: %s', $exception->getMessage()),
                 $exception->getCode(),
                 $exception
@@ -226,7 +227,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      *
      * @param  string  $path  File path
      *
-     * @throws UnableToReadFile
+     * @throws UnableToDeleteFile
      */
     public function delete(string $path): void
     {
@@ -253,30 +254,17 @@ final readonly class OciAdapter implements FilesystemAdapter
                     }
                 }
             } catch (GuzzleException $exception) {
-                if ($exception->getCode() === 404) {
-                    return; // Directory doesn't exist, that's fine
-                }
-
-                throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+                throw UnableToDeleteFile::atLocation($path, $exception->getMessage(), $exception);
             }
         }
 
         // Otherwise, proceed with single file deletion
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($prefixedPath);
 
         try {
-            $response = $this->client->send($uri, 'DELETE');
-
-            if ($response->getStatusCode() !== 204) {
-                throw new UnableToReadFile('Unable to delete file', $response->getStatusCode());
-            }
-        } catch (GuzzleException $exception) {
-            // If the file doesn't exist (404), that's fine for our purposes
-            if ($exception->getCode() === 404) {
-                return;
-            }
-
-            throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+            ResponseGuard::ok($this->client->send($uri, 'DELETE'), 'delete', 200, 204, 404);
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToDeleteFile::atLocation($path, $exception->getMessage(), $exception);
         }
     }
 
@@ -300,12 +288,12 @@ final readonly class OciAdapter implements FilesystemAdapter
      * @param  string  $contents  Contents to write
      * @param  Config  $config  Configuration options
      *
-     * @throws \League\Flysystem\UnableToWriteFile
+     * @throws UnableToWriteFile
      */
     public function write(string $path, string $contents, Config $config): void
     {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($prefixedPath);
 
         try {
             // Determine content type
@@ -338,13 +326,13 @@ final readonly class OciAdapter implements FilesystemAdapter
             );
 
             if ($response->getStatusCode() !== 200) {
-                throw \League\Flysystem\UnableToWriteFile::atLocation(
+                throw UnableToWriteFile::atLocation(
                     $path,
                     "HTTP {$response->getStatusCode()}"
                 );
             }
         } catch (GuzzleException $exception) {
-            throw \League\Flysystem\UnableToWriteFile::atLocation(
+            throw UnableToWriteFile::atLocation(
                 $path,
                 $exception->getMessage(),
                 $exception
@@ -412,7 +400,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * @param  string  $visibility  Maps to storage tier ('public', 'private', 'infrequent')
      *
      * @throws \InvalidArgumentException When invalid visibility value is provided
-     * @throws \League\Flysystem\UnableToSetVisibility When the operation fails
+     * @throws UnableToSetVisibility When the operation fails
      */
     public function setVisibility(string $path, string $visibility): void
     {
@@ -428,13 +416,13 @@ final readonly class OciAdapter implements FilesystemAdapter
             $success = $this->client->updateObjectStorageTier($path, $storageTier);
 
             if (! $success) {
-                throw \League\Flysystem\UnableToSetVisibility::atLocation(
+                throw UnableToSetVisibility::atLocation(
                     $path,
                     'Failed to set storage tier'
                 );
             }
         } catch (\Exception $exception) {
-            throw \League\Flysystem\UnableToSetVisibility::atLocation(
+            throw UnableToSetVisibility::atLocation(
                 $path,
                 "Error: {$exception->getMessage()}",
                 $exception
@@ -453,7 +441,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * @param  string  $path  File path
      * @return FileAttributes File attributes with visibility value
      *
-     * @throws \League\Flysystem\UnableToRetrieveMetadata When unable to get file info
+     * @throws UnableToRetrieveMetadata When unable to get file info
      */
     public function visibility(string $path): FileAttributes
     {
@@ -461,7 +449,7 @@ final readonly class OciAdapter implements FilesystemAdapter
             $objectInfo = $this->client->getObjectInfo($path);
 
             if ($objectInfo === null) {
-                throw \League\Flysystem\UnableToRetrieveMetadata::visibility(
+                throw UnableToRetrieveMetadata::visibility(
                     $path,
                     'File not found'
                 );
@@ -479,7 +467,7 @@ final readonly class OciAdapter implements FilesystemAdapter
 
             return new FileAttributes($path, null, $visibility);
         } catch (\Exception $exception) {
-            throw \League\Flysystem\UnableToRetrieveMetadata::visibility(
+            throw UnableToRetrieveMetadata::visibility(
                 $path,
                 "Error: {$exception->getMessage()}",
                 $exception
@@ -497,22 +485,18 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function mimeType(string $path): FileAttributes
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
 
         try {
-            $response = $this->client->send($uri, 'HEAD');
-
-            if ($response->getStatusCode() === 200) {
-                return new FileAttributes(
-                    path: $path,
-                    mimeType: $response->getHeader('Content-Type')[0]
-                );
+            $response = ResponseGuard::ok($this->client->send($uri, 'HEAD'), 'mimeType');
+            if (! $response->hasHeader('Content-Type')) {
+                throw new RuntimeException('Missing Content-Type header.');
             }
+            $mimeType = $response->getHeaderLine('Content-Type');
 
-            throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
-        } catch (GuzzleException $exception) {
-            throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+            return new FileAttributes(path: $path, mimeType: $mimeType);
+        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+            throw UnableToRetrieveMetadata::mimeType($path, $exception->getMessage(), $exception);
         }
     }
 
@@ -526,22 +510,18 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function lastModified(string $path): FileAttributes
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
 
         try {
-            $response = $this->client->send($uri, 'HEAD');
-
-            if ($response->getStatusCode() === 200) {
-                return new FileAttributes(
-                    path: $path,
-                    lastModified: Carbon::parse($response->getHeader('last-modified')[0])->timestamp
-                );
+            $response = ResponseGuard::ok($this->client->send($uri, 'HEAD'), 'lastModified');
+            if (! $response->hasHeader('last-modified')) {
+                throw new RuntimeException('Missing Last-Modified header.');
             }
+            $lastModified = Carbon::parse($response->getHeaderLine('last-modified'))->timestamp;
 
-            throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
-        } catch (GuzzleException $exception) {
-            throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+            return new FileAttributes(path: $path, lastModified: $lastModified);
+        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+            throw UnableToRetrieveMetadata::lastModified($path, $exception->getMessage(), $exception);
         }
     }
 
@@ -555,22 +535,18 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function fileSize(string $path): FileAttributes
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = sprintf('%s/o/%s', $this->client->getBucketUri(), rawurlencode($prefixedPath));
+        $uri = $this->client->getObjectUri($this->client->getPrefixedPath($path));
 
         try {
-            $response = $this->client->send($uri, 'HEAD');
-
-            if ($response->getStatusCode() === 200) {
-                return new FileAttributes(
-                    path: $path,
-                    fileSize: (int) $response->getHeader('Content-Length')[0]
-                );
+            $response = ResponseGuard::ok($this->client->send($uri, 'HEAD'), 'fileSize');
+            if (! $response->hasHeader('Content-Length')) {
+                throw new RuntimeException('Missing Content-Length header.');
             }
+            $fileSize = (int) $response->getHeaderLine('Content-Length');
 
-            throw new UnableToReadFile('Unable to read file', $response->getStatusCode());
-        } catch (GuzzleException $exception) {
-            throw new UnableToReadFile($exception->getMessage(), $exception->getCode(), $exception);
+            return new FileAttributes(path: $path, fileSize: $fileSize);
+        } catch (OciRequestFailed|GuzzleException|RuntimeException $exception) {
+            throw UnableToRetrieveMetadata::fileSize($path, $exception->getMessage(), $exception);
         }
     }
 
@@ -583,7 +559,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * @param  bool  $deep  Whether to recurse into subdirectories
      * @return iterable<FileAttributes> List of file attributes
      *
-     * @throws \League\Flysystem\UnableToListContents
+     * @throws UnableToListContents
      */
     public function listContents(string $path, bool $deep): iterable
     {
@@ -666,7 +642,7 @@ final readonly class OciAdapter implements FilesystemAdapter
 
             return $files;
         } catch (\Exception $exception) {
-            throw \League\Flysystem\UnableToListContents::atLocation($path, $deep, $exception);
+            throw UnableToListContents::atLocation($path, $deep, $exception);
         }
     }
 
@@ -679,7 +655,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * @param  string  $destination  Destination path
      * @param  Config  $config  Configuration options
      *
-     * @throws \League\Flysystem\UnableToMoveFile
+     * @throws UnableToMoveFile
      */
     public function move(string $source, string $destination, Config $config): void
     {
@@ -689,7 +665,7 @@ final readonly class OciAdapter implements FilesystemAdapter
             $success = $this->client->renameObject($prefixedSource, $prefixedDestination);
 
             if (! $success) {
-                throw \League\Flysystem\UnableToMoveFile::because(
+                throw UnableToMoveFile::because(
                     'operation failed',
                     $source,
                     $destination
@@ -701,7 +677,7 @@ final readonly class OciAdapter implements FilesystemAdapter
                 $this->copy($prefixedSource, $prefixedDestination, $config);
                 $this->delete($prefixedSource);
             } catch (\Exception $e) {
-                throw \League\Flysystem\UnableToMoveFile::fromLocationTo(
+                throw UnableToMoveFile::fromLocationTo(
                     $source,
                     $destination,
                     $e
@@ -719,7 +695,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * @param  string  $destination  Destination path
      * @param  Config  $config  Configuration options
      *
-     * @throws \League\Flysystem\UnableToCopyFile
+     * @throws UnableToCopyFile
      */
     public function copy(string $source, string $destination, Config $config): void
     {
@@ -747,14 +723,14 @@ final readonly class OciAdapter implements FilesystemAdapter
             $response = $this->client->send($uri, 'POST', [], $body);
 
             if ($response->getStatusCode() !== 200) {
-                throw \League\Flysystem\UnableToCopyFile::fromLocationTo(
+                throw UnableToCopyFile::fromLocationTo(
                     $source,
                     $destination,
-                    new \RuntimeException("HTTP {$response->getStatusCode()}")
+                    new RuntimeException("HTTP {$response->getStatusCode()}")
                 );
             }
         } catch (GuzzleException $exception) {
-            throw \League\Flysystem\UnableToCopyFile::fromLocationTo(
+            throw UnableToCopyFile::fromLocationTo(
                 $source,
                 $destination,
                 $exception
@@ -819,7 +795,7 @@ final readonly class OciAdapter implements FilesystemAdapter
      * Create a temporary URL for a file
      *
      * @param  string  $path  File path
-     * @param  \Carbon\Carbon|null  $expiresAt  Expiration time (defaults to 1 hour from now)
+     * @param  Carbon|null  $expiresAt  Expiration time (defaults to 1 hour from now)
      * @return string Temporary URL or empty string if creation failed
      */
     public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null): string

@@ -13,6 +13,7 @@ use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
 use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
 use LaravelOCI\LaravelOciDriver\Support\HttpClientFactory;
+use LaravelOCI\LaravelOciDriver\Support\ObjectNameEncoder;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamInterface;
 use Ramsey\Uuid\Uuid;
@@ -149,26 +150,22 @@ final readonly class OciClient
     private function applyPathPrefix(string $path): string
     {
         $prefix = $this->getPrefix();
-
-        // Normalize the path by removing leading slashes
         $path = ltrim($path, '/');
 
-        // check if already starts with prefix
-        if (str_starts_with($path, $prefix)) {
+        if ($prefix === '' || $path === $prefix || str_starts_with($path, $prefix.'/')) {
             return $path;
         }
 
-        // If no prefix is configured, return the normalized path
-        if ($prefix === '') {
-            return $path;
-        }
+        // An empty path addresses the prefix itself.
+        return $path === '' ? $prefix : $prefix.'/'.$path;
+    }
 
-        // If path is empty after normalization, return just the prefix
-        if ($path === '') {
-            return $prefix;
-        }
-
-        return $prefix.'/'.$path;
+    /**
+     * Build the object URI for an already-prefixed object name.
+     */
+    public function getObjectUri(string $objectName): string
+    {
+        return $this->getBucketUri().'/o/'.ObjectNameEncoder::encode($objectName);
     }
 
     /**
