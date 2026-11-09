@@ -31,7 +31,7 @@ class TestCase extends Orchestra
             'user_id' => 'ocid1.user.oc1..test',
             'storage_tier' => 'Standard',
             'key_fingerprint' => 'aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99',
-            'key_path' => __DIR__.'/test-key.pem',
+            'key_path' => __DIR__.'/fixtures/test-key.pem',
         ]);
     }
 }

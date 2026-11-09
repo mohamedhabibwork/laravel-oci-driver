@@ -1,6 +1,6 @@
 {
     "name": "mohamedhabibwork/laravel-oci-driver",
-    "description": "This is my package laravel-oci-driver",
+    "description": "Laravel Flysystem driver for Oracle Cloud Infrastructure (OCI) Object Storage",
     "keywords": [
         "Mohamed Habib",
         "laravel",
@@ -16,15 +16,23 @@
         }
     ],
     "require": {
-        "php": "^8.2 || ^8.3 || ^8.4",
-        "spatie/laravel-package-tools": "^1.16",
-        "illuminate/contracts": "^10.0||^11.0||^12.0||^13.0"
+        "php": "^8.2",
+        "ext-fileinfo": "*",
+        "ext-openssl": "*",
+        "guzzlehttp/guzzle": "^7.8",
+        "illuminate/contracts": "^10.0||^11.0||^12.0||^13.0",
+        "illuminate/filesystem": "^10.0||^11.0||^12.0||^13.0",
+        "illuminate/support": "^10.0||^11.0||^12.0||^13.0",
+        "league/flysystem": "^3.25",
+        "nesbot/carbon": "^2.72||^3.0",
+        "ramsey/uuid": "^4.7",
+        "spatie/laravel-package-tools": "^1.16"
     },
     "require-dev": {
         "laravel/pint": "^1.14",
         "nunomaduro/collision": "^8.1.1||^7.10.0",
         "larastan/larastan": "^2.9||^3.0",
-        "orchestra/testbench": "^10.0.0",
+        "orchestra/testbench": "^8.0||^9.0||^10.0||^11.0",
         "pestphp/pest": "^3.0||^4.0",
         "pestphp/pest-plugin-arch": "^3.0||^4.0",
         "pestphp/pest-plugin-laravel": "^3.0||^4.0",
@@ -65,7 +73,7 @@
                 "LaravelOCI\\LaravelOciDriver\\LaravelOciDriverServiceProvider"
             ],
             "aliases": {
-                "LaravelOciDriver": "LaravelOciDriverFacade"
+                "LaravelOciDriver": "LaravelOCI\\LaravelOciDriver\\Facades\\LaravelOciDriverFacade"
             }
         }
     },

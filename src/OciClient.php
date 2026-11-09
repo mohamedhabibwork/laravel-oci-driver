@@ -4,6 +4,7 @@ namespace LaravelOCI\LaravelOciDriver;
 
 use Carbon\Carbon;
 use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\RequestOptions;
@@ -13,6 +14,8 @@ use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
 use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\StreamInterface;
 use Ramsey\Uuid\Uuid;
 
 final readonly class OciClient
@@ -22,6 +25,8 @@ final readonly class OciClient
      */
     private function __construct(
         private array $config,
+        private ClientInterface $http,
+        private Signer $signer,
     ) {}
 
     /**
@@ -29,14 +34,23 @@ final readonly class OciClient
      *
      * @param  array<string, mixed>|OciConfig  $config
      */
-    public static function createWithConfiguration(array|OciConfig $config): self
+    public static function createWithConfiguration(array|OciConfig $config, ?ClientInterface $http = null): self
     {
         if ($config instanceof OciConfig) {
             $configArray = $config->toArray();
         } else {
             $configArray = $config;
         }
-        $instance = new self($configArray);
+        $instance = new self(
+            $configArray,
+            $http ?? self::defaultHttpClient($configArray),
+            new Signer(
+                $configArray['tenancy_id'] ?? null,
+                $configArray['user_id'] ?? null,
+                $configArray['key_fingerprint'] ?? null,
+                $configArray['key_path'] ?? null,
+            ),
+        );
         $instance->validateConfiguration();
 
         return $instance;
@@ -45,9 +59,24 @@ final readonly class OciClient
     /**
      * Create a new instance from an OciConfig instance directly.
      */
-    public static function fromOciConfig(OciConfig $ociConfig): self
+    public static function fromOciConfig(OciConfig $ociConfig, ?ClientInterface $http = null): self
     {
-        return self::createWithConfiguration($ociConfig);
+        return self::createWithConfiguration($ociConfig, $http);
+    }
+
+    /**
+     * Build the default Guzzle client used when none is injected.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    private static function defaultHttpClient(array $config): ClientInterface
+    {
+        return new Client([
+            RequestOptions::HTTP_ERRORS => false,
+            RequestOptions::ALLOW_REDIRECTS => false,
+            RequestOptions::TIMEOUT => (int) ($config['timeout'] ?? 30),
+            RequestOptions::CONNECT_TIMEOUT => (int) ($config['connect_timeout'] ?? 10),
+        ]);
     }
 
     /**
@@ -99,7 +128,10 @@ final readonly class OciClient
     }
 
     /**
-     * Send a request to the OCI API.
+     * Send a signed request to the OCI API.
+     *
+     * @param  array<string, string>  $header
+     * @param  array<string, mixed>  $options  Extra Guzzle request options (e.g. ['stream' => true])
      *
      * @throws GuzzleException
      */
@@ -107,18 +139,16 @@ final readonly class OciClient
         string $uri,
         string $method,
         array $header = [],
-        ?string $body = null,
-        ?string $contentType = 'application/json'
-    ) {
-        $authorizationHeaders = $this->getAuthorizationHeaders($uri, $method, $body, $contentType);
-
-        $client = new Client([
-            RequestOptions::ALLOW_REDIRECTS => false,
-        ]);
+        StreamInterface|string|null $body = null,
+        ?string $contentType = 'application/json',
+        array $options = []
+    ): ResponseInterface {
+        $signedBody = is_string($body) ? $body : null;
+        $authorizationHeaders = $this->getAuthorizationHeaders($uri, $method, $signedBody, $contentType);
 
         $request = new Request($method, $uri, array_merge($header, $authorizationHeaders), $body);
 
-        return $client->send($request);
+        return $this->http->send($request, $options);
     }
 
     /**
@@ -146,7 +176,7 @@ final readonly class OciClient
             return $prefix;
         }
 
-        return $prefix . '/' . $path;
+        return $prefix.'/'.$path;
     }
 
     /**
@@ -262,8 +292,7 @@ final readonly class OciClient
         string $contentType = 'application/json'
     ): array {
         $headers = [];
-        $signer = new Signer($this->getTenancy(), $this->getUser(), $this->getFingerprint(), $this->getPrivateKey());
-        $strings = $signer->getHeaders($uri, $method, $body, $contentType);
+        $strings = $this->signer->getHeaders($uri, $method, $body, $contentType);
 
         foreach ($strings as $item) {
             [$name, $value] = explode(': ', $item, 2);
@@ -367,7 +396,7 @@ final readonly class OciClient
             return ['deleted' => $deleted, 'errors' => $errors];
         } catch (GuzzleException $exception) {
             // If the request totally failed, report all paths as errors
-            $errors = array_map(fn(string $path) => [
+            $errors = array_map(fn (string $path) => [
                 'path' => $path,
                 'error' => $exception->getMessage(),
             ], $paths);
@@ -438,7 +467,7 @@ final readonly class OciClient
         $uri = sprintf('%s/actions/restoreObjects', $this->getBucketUri());
 
         $bodyData = [
-            'objectNames' => array_map(fn($p) => $this->applyPathPrefix($p), $paths),
+            'objectNames' => array_map(fn ($p) => $this->applyPathPrefix($p), $paths),
             'hours' => $hours,
         ];
 
@@ -514,7 +543,7 @@ final readonly class OciClient
                     'content_type' => $metadata['Content-Type'] ?? null,
                     'storage_tier' => $metadata['Storage-Tier'] ?? null,
                     'etag' => $metadata['ETag'] ?? null,
-                    'metadata' => array_filter($metadata, fn($key) => str_starts_with($key, 'x-amz-meta-'), ARRAY_FILTER_USE_KEY),
+                    'metadata' => array_filter($metadata, fn ($key) => str_starts_with($key, 'x-amz-meta-'), ARRAY_FILTER_USE_KEY),
                 ];
             }
 
@@ -551,7 +580,7 @@ final readonly class OciClient
         ]);
 
         if (! empty($queryParams)) {
-            $uri .= '?' . http_build_query($queryParams);
+            $uri .= '?'.http_build_query($queryParams);
         }
 
         try {
@@ -582,7 +611,7 @@ final readonly class OciClient
     {
         $prefix = $this->getPrefix();
 
-        if ($prefix === '' || ! str_starts_with($prefixedPath, $prefix . '/')) {
+        if ($prefix === '' || ! str_starts_with($prefixedPath, $prefix.'/')) {
             return $prefixedPath;
         }
 
@@ -602,8 +631,8 @@ final readonly class OciClient
         // If prefix is configured, add it to the options
         if ($prefix !== '') {
             $options['prefix'] = isset($options['prefix'])
-                ? $prefix . '/' . ltrim($options['prefix'], '/')
-                : $prefix . '/';
+                ? $prefix.'/'.ltrim($options['prefix'], '/')
+                : $prefix.'/';
         }
 
         return $this->listObjects($options);
