@@ -66,7 +66,7 @@ Use `passphrase` for an encrypted key.
 |---|---|---|
 | `storage_tier` | `Standard` | `Standard`, `InfrequentAccess` or `Archive` |
 | `url_path_prefix` | `''` | Prefix for every object name |
-| `timeout` / `connect_timeout` | `30` / `10` | Seconds |
+| `timeout` / `connect_timeout` | `30` / `10` | Seconds; `timeout` is the total request time and does not apply to upload PUTs |
 | `retry_attempts` / `retry_delay` | `3` / `1000` | Retries on connection errors, 429, 5xx; delay in ms, exponential |
 | `upload.multipart_threshold` | `104857600` | Bytes; larger (or unknown-size) streams use multipart |
 | `upload.chunk_size` | `33554432` | Part size in bytes; minimum 10 MiB (`10485760`) |
@@ -116,7 +116,7 @@ Storage::disk('oci')->put('reports/q1.pdf', $contents, [
 ## Listing, directories, copy and move
 
 - Listing is paginated and lazy; returned paths do not include `url_path_prefix`.
-- `makeDirectory()` writes an empty `dir/` object; `deleteDirectory()` deletes every object under the directory with `delete_concurrency` parallel requests and throws `UnableToDeleteDirectory` listing the keys that failed.
+- `makeDirectory()` writes an empty `dir/` object; `deleteDirectory()` deletes every object under the directory with `delete_concurrency` parallel requests and throws `UnableToDeleteDirectory` listing the keys that failed. On a disk without `url_path_prefix`, deleting the root (`''` or `'/'`) is refused to protect the bucket.
 - `copy()` is asynchronous on OCI; the driver polls the work request until it completes, fails or `copy_timeout` elapses. `move()` uses OCI `renameObject` (same bucket, atomic).
 
 ## Temporary URLs
@@ -178,7 +178,7 @@ Failures are mapped to the matching Flysystem exception (`UnableToReadFile`, `Un
 
 - `php artisan oci:config --validate --disk=<disk>` shows which required value is missing.
 - Names with spaces, `+` or `%` are percent-encoded as a single path segment; do not pre-encode them.
-- A path counts as already prefixed only if it equals the prefix or starts with `prefix/` (`localfoo` is not under `local`).
+- The adapter always applies `url_path_prefix`: with prefix `local`, `write('local/a')` stores `local/local/a`. (`OciClient::getPrefixedPath()` keeps its idempotent rule for direct client callers.)
 - See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Upgrading

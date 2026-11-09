@@ -12,6 +12,15 @@ All notable changes to `laravel-oci-driver` will be documented in this file.
 - `OciClient::listObjects()` throws on API errors instead of returning `[]`.
 - `upload.chunk_size` default raised from 8 MiB to 32 MiB; values below 10 MiB are raised to 10 MiB.
 - Operations that silently "succeeded" (`deleteDirectory`, storage tier change, restore) now either work or throw.
+- `OciClient::getObjectInfo()` now throws `OciRequestFailed` on any status other than 200 and 404 (it used to treat them as "not found").
+- `OciClient::restoreObjects([])` no longer validates `$hours`.
+- `deleteDirectory()` refuses to delete the bucket root on a disk without `url_path_prefix` (`UnableToDeleteDirectory`, no request is sent); deleting the root of a prefixed disk is still allowed.
+- Upload PUTs (single PUT and every multipart part) are exempt from the total request `timeout`; `connect_timeout` still applies.
+- The adapter always applies `url_path_prefix`: a path that happens to start with the prefix text is no longer treated as already prefixed (with prefix `backups`, `write('backups/a')` stores `backups/backups/a`). `OciClient::getPrefixedPath()` and the other public client methods keep the idempotent rule.
+- User metadata keys are sent as `opc-meta-*` in multipart-create and copy requests (keys already starting with `opc-meta-` are kept).
+- `updateStorageTier()` with an unknown tier string now throws `UnableToWriteFile` instead of silently using `Standard`.
+- Signer/key errors, JSON encoding errors and invalid request values raised inside adapter operations are mapped to the operation's Flysystem exception; `OciClient::renameObject()` returns `false` on JSON encoding errors.
+- Listing requests encode spaces as `%20`, `etag` is requested on listings, and `copy_poll_interval` is clamped to at least 100 ms (`copy_timeout` to at least 0).
 
 ### Added
 
