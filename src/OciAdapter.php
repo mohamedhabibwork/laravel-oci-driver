@@ -392,90 +392,91 @@ final readonly class OciAdapter implements FilesystemAdapter
     }
 
     /**
-     * Set storage tier for a file using the visibility parameter
+     * Set the visibility of a file.
      *
-     * This maps the Flysystem visibility concept to OCI storage tiers:
-     * - 'public': Standard tier (frequently accessed objects, good performance)
-     * - 'private': Archive tier (rarely accessed objects, lower cost)
-     * - 'infrequent': InfrequentAccess tier (balance between performance and cost)
+     * OCI Object Storage has no per-object visibility. When `visibility_mapping` is configured
+     * (for example `['public' => 'Standard', 'private' => 'InfrequentAccess']`), the visibility is
+     * translated to a storage tier and applied; otherwise this operation is unsupported.
      *
      * @param  string  $path  File path
-     * @param  string  $visibility  Maps to storage tier ('public', 'private', 'infrequent')
+     * @param  string  $visibility  Visibility key present in `visibility_mapping`
      *
-     * @throws \InvalidArgumentException When invalid visibility value is provided
-     * @throws UnableToSetVisibility When the operation fails
+     * @throws UnableToSetVisibility When unsupported, unmapped, or the update fails
      */
     public function setVisibility(string $path, string $visibility): void
     {
-        // Map visibility to storage tier
-        $storageTier = match ($visibility) {
-            'public' => StorageTier::STANDARD,
-            'private' => StorageTier::ARCHIVE,
-            'infrequent' => StorageTier::INFREQUENT_ACCESS,
-            default => throw new \InvalidArgumentException("Invalid visibility value: {$visibility}. Use 'public', 'private', or 'infrequent'."),
-        };
+        $mapping = $this->visibilityMapping();
 
-        try {
-            $success = $this->client->updateObjectStorageTier($path, $storageTier);
-
-            if (! $success) {
-                throw UnableToSetVisibility::atLocation(
-                    $path,
-                    'Failed to set storage tier'
-                );
-            }
-        } catch (\Exception $exception) {
+        if ($mapping === null) {
             throw UnableToSetVisibility::atLocation(
                 $path,
-                "Error: {$exception->getMessage()}",
-                $exception
+                'OCI Object Storage has no per-object visibility; control access at bucket level or set visibility_mapping'
             );
+        }
+
+        if (! isset($mapping[$visibility]) || ! is_string($mapping[$visibility])) {
+            throw UnableToSetVisibility::atLocation($path, "Visibility '{$visibility}' is not present in visibility_mapping");
+        }
+
+        try {
+            $this->updateStorageTier($path, $mapping[$visibility]);
+        } catch (UnableToWriteFile $exception) {
+            throw UnableToSetVisibility::atLocation($path, $exception->reason(), $exception);
         }
     }
 
     /**
-     * Get storage tier of a file mapped to visibility concept
+     * Get the visibility of a file.
      *
-     * This maps OCI storage tiers back to Flysystem visibility concept:
-     * - Standard tier -> 'public'
-     * - Archive tier -> 'private'
-     * - InfrequentAccess tier -> 'infrequent'
+     * Without `visibility_mapping` this verifies the object exists and returns the disk's
+     * configured default visibility. With a mapping, the object's storage tier is reverse-mapped
+     * to a visibility, falling back to the default when the tier is not mapped.
      *
      * @param  string  $path  File path
      * @return FileAttributes File attributes with visibility value
      *
-     * @throws UnableToRetrieveMetadata When unable to get file info
+     * @throws UnableToRetrieveMetadata When the object is missing or the request fails
      */
     public function visibility(string $path): FileAttributes
     {
         try {
             $objectInfo = $this->client->getObjectInfo($path);
-
-            if ($objectInfo === null) {
-                throw UnableToRetrieveMetadata::visibility(
-                    $path,
-                    'File not found'
-                );
-            }
-
-            // Extract the storage tier from object metadata
-            $storageTier = $objectInfo['storage-tier'] ?? 'Standard';
-
-            // Map storage tier to visibility
-            $visibility = match ($storageTier) {
-                'Archive' => 'private',
-                'InfrequentAccess' => 'infrequent',
-                default => 'public', // Standard
-            };
-
-            return new FileAttributes($path, null, $visibility);
-        } catch (\Exception $exception) {
-            throw UnableToRetrieveMetadata::visibility(
-                $path,
-                "Error: {$exception->getMessage()}",
-                $exception
-            );
+        } catch (OciRequestFailed|GuzzleException $exception) {
+            throw UnableToRetrieveMetadata::visibility($path, $exception->getMessage(), $exception);
         }
+
+        if ($objectInfo === null) {
+            throw UnableToRetrieveMetadata::visibility($path, 'File not found');
+        }
+
+        $visibility = $this->defaultVisibility();
+        $tier = $objectInfo['storage_tier'] ?? null;
+
+        foreach ($this->visibilityMapping() ?? [] as $name => $mappedTier) {
+            if ($tier !== null && $mappedTier === $tier) {
+                $visibility = (string) $name;
+                break;
+            }
+        }
+
+        return new FileAttributes($path, null, $visibility);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function visibilityMapping(): ?array
+    {
+        $mapping = $this->client->getOciConfig()->get('visibility_mapping');
+
+        return is_array($mapping) && $mapping !== [] ? $mapping : null;
+    }
+
+    private function defaultVisibility(): string
+    {
+        $visibility = $this->client->getOciConfig()->get('visibility', 'private');
+
+        return is_string($visibility) && $visibility !== '' ? $visibility : 'private';
     }
 
     /**
@@ -713,40 +714,63 @@ final readonly class OciAdapter implements FilesystemAdapter
     }
 
     /**
-     * Restore objects from Archive storage tier
-     *
+     * Restore an archived object.
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/RestoreObjects
      *
      * @param  string  $path  Path to restore
-     * @param  int  $hours  Number of hours to make the restored objects available (10-240000 hours)
-     * @return bool True if restore request was successful
+     * @param  int  $hours  Number of hours to make the restored object available (10-240000 hours)
+     * @return bool True when the restore request was accepted
+     *
+     * @throws UnableToWriteFile When the request fails
      */
     public function restore(string $path, int $hours = 24): bool
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
+        try {
+            $response = $this->client->send(
+                $this->client->restoreObjectUri(),
+                'POST',
+                [],
+                $this->client->restoreObjectBody($path, $hours),
+            );
+            ResponseGuard::ok($response, 'restore object', 200, 202);
+        } catch (OciRequestFailed|GuzzleException|\JsonException|\InvalidArgumentException $exception) {
+            throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
+        }
 
-        return $this->client->restoreObjects([$prefixedPath], $hours);
+        return true;
     }
 
     /**
-     * Update storage tier for an object
-     *
+     * Update the storage tier of an object.
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/UpdateObjectStorageTier
      *
      * @param  string  $path  Object path
      * @param  string|StorageTier  $storageTier  Storage tier to change to
-     * @return bool True if successful
+     * @return bool True when the tier was updated
+     *
+     * @throws UnableToWriteFile When the request fails
      */
     public function updateStorageTier(string $path, string|StorageTier $storageTier): bool
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
         if (is_string($storageTier)) {
             $storageTier = StorageTier::fromString($storageTier);
         }
 
-        return $this->client->updateObjectStorageTier($prefixedPath, $storageTier);
+        try {
+            $response = $this->client->send(
+                $this->client->updateStorageTierUri(),
+                'POST',
+                [],
+                $this->client->updateStorageTierBody($path, $storageTier),
+            );
+            ResponseGuard::ok($response, 'update storage tier');
+        } catch (OciRequestFailed|GuzzleException|\JsonException $exception) {
+            throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
+        }
+
+        return true;
     }
 
     /**

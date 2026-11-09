@@ -443,46 +443,63 @@ final readonly class OciClient
     }
 
     /**
-     * Restore archived objects to a storage tier.
+     * Restore archived objects, one request per object.
+     *
+     * Stops at the first failed object.
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/RestoreObjects
      *
      * @param  array<string>  $paths  List of object paths to restore
      * @param  int  $hours  Number of hours to make the restored objects available (10-240000 hours)
-     * @return bool True if the restoration request was successful
+     * @return bool True if every restore request was accepted, false otherwise (including transport errors)
      *
-     * @throws GuzzleException
      * @throws \InvalidArgumentException When hours is out of range
      */
     public function restoreObjects(array $paths, int $hours = 24): bool
+    {
+        foreach ($paths as $path) {
+            try {
+                $response = $this->send($this->restoreObjectUri(), 'POST', [], $this->restoreObjectBody($path, $hours));
+            } catch (GuzzleException|\JsonException) {
+                return false;
+            }
+
+            if (! in_array($response->getStatusCode(), [200, 202], true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * URI of the restoreObjects action.
+     *
+     * @internal
+     */
+    public function restoreObjectUri(): string
+    {
+        return sprintf('%s/actions/restoreObjects', $this->getBucketUri());
+    }
+
+    /**
+     * JSON body of a restoreObjects request for one object.
+     *
+     * @internal
+     *
+     * @throws \InvalidArgumentException When hours is out of range
+     * @throws \JsonException
+     */
+    public function restoreObjectBody(string $path, int $hours): string
     {
         if ($hours < 10 || $hours > 240000) {
             throw new \InvalidArgumentException('Hours must be between 10 and 240000');
         }
 
-        if (empty($paths)) {
-            return true; // Nothing to restore
-        }
-
-        $uri = sprintf('%s/actions/restoreObjects', $this->getBucketUri());
-
-        $bodyData = [
-            'objectNames' => array_map(fn ($p) => $this->applyPathPrefix($p), $paths),
+        return json_encode([
+            'objectName' => $this->applyPathPrefix($path),
             'hours' => $hours,
-        ];
-
-        $body = json_encode($bodyData);
-        if ($body === false) {
-            throw new \RuntimeException('Failed to encode request body to JSON');
-        }
-
-        try {
-            $response = $this->send($uri, 'POST', [], $body);
-
-            return $response->getStatusCode() === 200;
-        } catch (GuzzleException $exception) {
-            return false;
-        }
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 
     /**
@@ -492,68 +509,85 @@ final readonly class OciClient
      *
      * @param  string  $path  Object path
      * @param  StorageTier  $storageTier  New storage tier
-     * @return bool True if successful, false otherwise
-     *
-     * @throws GuzzleException
+     * @return bool True if successful, false otherwise (including transport errors)
      */
     public function updateObjectStorageTier(string $path, StorageTier $storageTier): bool
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), rawurlencode($this->applyPathPrefix($path)));
-
         try {
             $response = $this->send(
-                $uri,
+                $this->updateStorageTierUri(),
                 'POST',
-                ['Storage-Tier' => $storageTier->value()],
-                null
+                [],
+                $this->updateStorageTierBody($path, $storageTier),
             );
 
             return $response->getStatusCode() === 200;
-        } catch (GuzzleException $exception) {
+        } catch (GuzzleException|\JsonException) {
             return false;
         }
     }
 
     /**
-     * Get detailed information about an object.
+     * URI of the updateObjectStorageTier action.
+     *
+     * @internal
+     */
+    public function updateStorageTierUri(): string
+    {
+        return sprintf('%s/actions/updateObjectStorageTier', $this->getBucketUri());
+    }
+
+    /**
+     * JSON body of an updateObjectStorageTier request.
+     *
+     * @internal
+     *
+     * @throws \JsonException
+     */
+    public function updateStorageTierBody(string $path, StorageTier $storageTier): string
+    {
+        return json_encode([
+            'objectName' => $this->applyPathPrefix($path),
+            'storageTier' => $storageTier->value(),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * Get detailed information about an object (HEAD).
      *
      * @link https://docs.oracle.com/en-us/iaas/api/#/en/objectstorage/20160918/Object/HeadObject
      *
      * @param  string  $path  Object path
      * @return array<string, mixed>|null Object metadata or null if not found
      *
+     * @throws OciRequestFailed On any status other than 200 or 404
      * @throws GuzzleException
      */
     public function getObjectInfo(string $path): ?array
     {
-        $uri = sprintf('%s/o/%s', $this->getBucketUri(), rawurlencode($this->applyPathPrefix($path)));
+        $response = $this->send($this->getObjectUri($this->applyPathPrefix($path)), 'HEAD');
 
-        try {
-            $response = $this->send($uri, 'HEAD');
-
-            if ($response->getStatusCode() === 200) {
-                $metadata = [];
-                foreach ($response->getHeaders() as $name => $values) {
-                    $metadata[$name] = $values[0];
-                }
-
-                return [
-                    'size' => (int) ($metadata['Content-Length'] ?? 0),
-                    'last_modified' => $metadata['Last-Modified'] ?? null,
-                    'content_type' => $metadata['Content-Type'] ?? null,
-                    'storage_tier' => $metadata['Storage-Tier'] ?? null,
-                    'etag' => $metadata['ETag'] ?? null,
-                    'metadata' => array_filter($metadata, fn ($key) => str_starts_with($key, 'x-amz-meta-'), ARRAY_FILTER_USE_KEY),
-                ];
-            }
-
+        if ($response->getStatusCode() === 404) {
             return null;
-        } catch (GuzzleException $exception) {
-            if ($exception->getCode() === 404) {
-                return null; // Object not found
-            }
-            throw $exception;
         }
+
+        ResponseGuard::ok($response, 'head object');
+
+        $metadata = [];
+        foreach ($response->getHeaders() as $name => $values) {
+            if (str_starts_with(strtolower($name), 'opc-meta-')) {
+                $metadata[strtolower($name)] = $values[0];
+            }
+        }
+
+        return [
+            'size' => (int) $response->getHeaderLine('Content-Length'),
+            'last_modified' => $response->getHeaderLine('Last-Modified') ?: null,
+            'content_type' => $response->getHeaderLine('Content-Type') ?: null,
+            'storage_tier' => $response->getHeaderLine('storage-tier') ?: null,
+            'etag' => $response->getHeaderLine('ETag') ?: null,
+            'metadata' => $metadata,
+        ];
     }
 
     /**
