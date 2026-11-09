@@ -3,17 +3,16 @@
 namespace LaravelOCI\LaravelOciDriver;
 
 use Carbon\Carbon;
-use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Psr7\Request;
-use GuzzleHttp\RequestOptions;
 use Illuminate\Support\Facades\Log;
 use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
 use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
+use LaravelOCI\LaravelOciDriver\Support\HttpClientFactory;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamInterface;
 use Ramsey\Uuid\Uuid;
@@ -45,7 +44,7 @@ final readonly class OciClient
 
         return new self(
             $configArray,
-            $http ?? self::defaultHttpClient($configArray),
+            $http ?? HttpClientFactory::make($configArray),
             Signer::fromConfig($configArray),
         );
     }
@@ -56,21 +55,6 @@ final readonly class OciClient
     public static function fromOciConfig(OciConfig $ociConfig, ?ClientInterface $http = null): self
     {
         return self::createWithConfiguration($ociConfig, $http);
-    }
-
-    /**
-     * Build the default Guzzle client used when none is injected.
-     *
-     * @param  array<string, mixed>  $config
-     */
-    private static function defaultHttpClient(array $config): ClientInterface
-    {
-        return new Client([
-            RequestOptions::HTTP_ERRORS => false,
-            RequestOptions::ALLOW_REDIRECTS => false,
-            RequestOptions::TIMEOUT => (int) ($config['timeout'] ?? 30),
-            RequestOptions::CONNECT_TIMEOUT => (int) ($config['connect_timeout'] ?? 10),
-        ]);
     }
 
     /**

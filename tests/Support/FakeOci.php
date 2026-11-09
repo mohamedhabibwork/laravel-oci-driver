@@ -2,13 +2,12 @@
 
 namespace LaravelOCI\LaravelOciDriver\Tests\Support;
 
-use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use LaravelOCI\LaravelOciDriver\OciAdapter;
 use LaravelOCI\LaravelOciDriver\OciClient;
+use LaravelOCI\LaravelOciDriver\Support\HttpClientFactory;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -30,18 +29,14 @@ final class FakeOci
     private function __construct(array $configOverrides)
     {
         $this->mock = new MockHandler;
-        $stack = HandlerStack::create($this->mock);
-        $stack->push(Middleware::history($this->history));
+        $config = array_merge(self::baseConfig(), $configOverrides);
 
-        $http = new Client([
-            'handler' => $stack,
-            'http_errors' => false,
-            'allow_redirects' => false,
-        ]);
+        // History wraps the mock (innermost), so every retried attempt is recorded.
+        $recordingHandler = Middleware::history($this->history)($this->mock);
 
         $this->client = OciClient::createWithConfiguration(
-            array_merge(self::baseConfig(), $configOverrides),
-            $http,
+            $config,
+            HttpClientFactory::make($config, $recordingHandler),
         );
     }
 
