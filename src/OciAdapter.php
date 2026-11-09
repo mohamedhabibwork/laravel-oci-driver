@@ -4,9 +4,12 @@ namespace LaravelOCI\LaravelOciDriver;
 
 use Carbon\Carbon;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Psr7\LimitStream;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Support\Facades\Log;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
+use LaravelOCI\LaravelOciDriver\Support\MultipartUploader;
 use LaravelOCI\LaravelOciDriver\Support\ResponseGuard;
 use League\Flysystem\Config;
 use League\Flysystem\FileAttributes;
@@ -20,6 +23,8 @@ use League\Flysystem\UnableToReadFile;
 use League\Flysystem\UnableToRetrieveMetadata;
 use League\Flysystem\UnableToSetVisibility;
 use League\Flysystem\UnableToWriteFile;
+use League\MimeTypeDetection\ExtensionMimeTypeDetector;
+use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 
 /**
@@ -88,27 +93,16 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function writeStream(string $path, $contents, Config $config): void
     {
-        $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = $this->client->getObjectUri($prefixedPath);
+        $stream = Utils::streamFor($contents);
+        $size = $this->remainingSize($contents);
+        $position = $size === null ? false : ftell($contents);
 
-        $body = stream_get_contents($contents);
-        $mime = finfo_buffer(finfo_open(FILEINFO_MIME_TYPE), $body);
-
-        try {
-            $response = $this->client->send(
-                $uri,
-                'PUT',
-                ['storage-tier' => $this->client->getStorageTier()->value()],
-                $body,
-                $mime,
-            );
-
-            if ($response->getStatusCode() !== 200) {
-                throw new UnableToWriteFile('Unable to write file', $response->getStatusCode());
-            }
-        } catch (GuzzleException $exception) {
-            throw new UnableToWriteFile($exception->getMessage(), $exception->getCode(), $exception);
+        // The HTTP layer rewinds seekable bodies, so pin the start to the current position.
+        if ($position) {
+            $stream = new LimitStream($stream, -1, $position);
         }
+
+        $this->upload($path, $stream, $size, $config, false);
     }
 
     /**
@@ -292,100 +286,83 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function write(string $path, string $contents, Config $config): void
     {
+        $this->upload($path, Utils::streamFor($contents), strlen($contents), $config, true, $contents);
+    }
+
+    /**
+     * Single PUT for known small bodies, native multipart for large or unknown-size ones.
+     *
+     * @param  ?int  $size  Bytes to upload, or null when unknown
+     * @param  ?string  $checksumSource  String body to hash (never set for streams)
+     */
+    private function upload(string $path, StreamInterface $body, ?int $size, Config $config, bool $checksum, ?string $checksumSource = null): void
+    {
         $prefixedPath = $this->client->getPrefixedPath($path);
-        $uri = $this->client->getObjectUri($prefixedPath);
+        $ociConfig = $this->client->getOciConfig();
 
         try {
-            // Determine content type
-            $contentType = $config->get('content_type', $this->detectContentType($contents, $path));
+            $headers = $this->buildWriteHeaders($path, $config);
 
-            // Get storage tier - either from config or default from client
-            $storageTier = $config->get('storage_tier', $this->client->getStorageTier()->value());
+            if ($size !== null && $size <= (int) $ociConfig->get('upload.multipart_threshold', 104857600)) {
+                if ($checksum && $checksumSource !== null && $ociConfig->get('upload.enable_checksum', true)) {
+                    $headers['Content-MD5'] = base64_encode(md5($checksumSource, true));
+                }
 
-            // Extract custom metadata if provided
-            $headers = ['storage-tier' => $storageTier];
+                ResponseGuard::ok($this->client->send(
+                    $this->client->getObjectUri($prefixedPath),
+                    'PUT',
+                    $headers + ['Content-Length' => (string) $size],
+                    $body,
+                    $headers['Content-Type'],
+                ), 'write');
 
-            // Add any custom metadata headers
-            $metadata = $config->get('metadata', []);
-            foreach ($metadata as $key => $value) {
-                // OCI uses x-amz-meta- prefix for custom metadata
-                $headers["x-amz-meta-{$key}"] = $value;
+                return;
             }
 
-            // Content-MD5 for data integrity validation
-            if ($config->get('checksum', true)) {
-                $headers['Content-MD5'] = base64_encode(md5($contents, true));
-            }
-
-            $response = $this->client->send(
-                $uri,
-                'PUT',
-                $headers,
-                $contents,
-                $contentType
-            );
-
-            if ($response->getStatusCode() !== 200) {
-                throw UnableToWriteFile::atLocation(
-                    $path,
-                    "HTTP {$response->getStatusCode()}"
-                );
-            }
-        } catch (GuzzleException $exception) {
-            throw UnableToWriteFile::atLocation(
-                $path,
-                $exception->getMessage(),
-                $exception
-            );
+            (new MultipartUploader($this->client, $ociConfig->getChunkSize()))
+                ->upload($prefixedPath, $body, $headers);
+        } catch (OciRequestFailed|GuzzleException|\LengthException|\UnexpectedValueException $exception) {
+            throw UnableToWriteFile::atLocation($path, $exception->getMessage(), $exception);
         }
     }
 
     /**
-     * Detect content type from contents and path
-     *
-     * @param  string  $contents  File contents
-     * @param  string  $path  File path
-     * @return string The detected MIME type
+     * @return array<string, string>
      */
-    private function detectContentType(string $contents, string $path): string
+    private function buildWriteHeaders(string $path, Config $config): array
     {
-        // First try to detect from path extension
-        $extension = pathinfo($path, PATHINFO_EXTENSION);
-        if ($extension) {
-            $mappings = [
-                'jpg' => 'image/jpeg',
-                'jpeg' => 'image/jpeg',
-                'png' => 'image/png',
-                'gif' => 'image/gif',
-                'webp' => 'image/webp',
-                'svg' => 'image/svg+xml',
-                'pdf' => 'application/pdf',
-                'html' => 'text/html',
-                'htm' => 'text/html',
-                'css' => 'text/css',
-                'js' => 'application/javascript',
-                'json' => 'application/json',
-                'xml' => 'application/xml',
-                'zip' => 'application/zip',
-                'tar' => 'application/x-tar',
-                'gz' => 'application/gzip',
-                'txt' => 'text/plain',
-                'csv' => 'text/csv',
-                'md' => 'text/markdown',
-            ];
+        $headers = [
+            'storage-tier' => (string) $config->get('storage_tier', $this->client->getStorageTier()->value()),
+            'Content-Type' => (string) ($config->get('content_type')
+                ?? (new ExtensionMimeTypeDetector)->detectMimeTypeFromPath($path)
+                ?? 'application/octet-stream'),
+        ];
 
-            if (isset($mappings[strtolower($extension)])) {
-                return $mappings[strtolower($extension)];
-            }
+        foreach ($config->get('metadata', []) as $key => $value) {
+            $headers['opc-meta-'.$key] = (string) $value;
         }
 
-        // Fall back to finfo for content-based detection
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        if ($finfo === false) {
-            return 'application/octet-stream';
+        return $headers;
+    }
+
+    /**
+     * Bytes left to read from the resource's current position, or null when unknown (pipes, sockets).
+     *
+     * @param  resource  $resource
+     */
+    private function remainingSize($resource): ?int
+    {
+        if (! (stream_get_meta_data($resource)['seekable'] ?? false)) {
+            return null;
         }
 
-        return finfo_buffer($finfo, $contents) ?: 'application/octet-stream';
+        $stat = fstat($resource);
+        $position = ftell($resource);
+        if ($stat === false || $position === false || ! isset($stat['size'])) {
+            return null;
+        }
+
+        return max(0, $stat['size'] - $position);
     }
 
     /**

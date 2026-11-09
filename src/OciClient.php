@@ -293,6 +293,14 @@ final readonly class OciClient
     }
 
     /**
+     * Get the configuration as an OciConfig.
+     */
+    public function getOciConfig(): OciConfig
+    {
+        return new OciConfig($this->config);
+    }
+
+    /**
      * Get the storage tier.
      */
     public function getStorageTier(): StorageTier
