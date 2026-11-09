@@ -41,19 +41,13 @@ final readonly class OciClient
         } else {
             $configArray = $config;
         }
-        $instance = new self(
+        self::validateConfiguration($configArray);
+
+        return new self(
             $configArray,
             $http ?? self::defaultHttpClient($configArray),
-            new Signer(
-                $configArray['tenancy_id'] ?? null,
-                $configArray['user_id'] ?? null,
-                $configArray['key_fingerprint'] ?? null,
-                $configArray['key_path'] ?? null,
-            ),
+            Signer::fromConfig($configArray),
         );
-        $instance->validateConfiguration();
-
-        return $instance;
     }
 
     /**
@@ -84,7 +78,7 @@ final readonly class OciClient
      *
      * @throws \InvalidArgumentException When configuration is invalid
      */
-    private function validateConfiguration(): void
+    private static function validateConfiguration(array $config): void
     {
         $requiredKeys = [
             'namespace',
@@ -97,7 +91,7 @@ final readonly class OciClient
             'key_path',
         ];
 
-        $missingKeys = array_diff($requiredKeys, array_keys($this->config));
+        $missingKeys = array_diff($requiredKeys, array_keys($config));
 
         if (! empty($missingKeys)) {
             throw new \InvalidArgumentException(
@@ -143,8 +137,22 @@ final readonly class OciClient
         ?string $contentType = 'application/json',
         array $options = []
     ): ResponseInterface {
-        $signedBody = is_string($body) ? $body : null;
-        $authorizationHeaders = $this->getAuthorizationHeaders($uri, $method, $signedBody, $contentType);
+        $excludeBodyHeaders = false;
+        if ($body instanceof StreamInterface) {
+            if (strtoupper($method) === 'PUT') {
+                $signedBody = null;
+                $excludeBodyHeaders = true;
+            } else {
+                $signedBody = (string) $body;
+                if ($body->isSeekable()) {
+                    $body->rewind();
+                }
+            }
+        } else {
+            $signedBody = $body;
+        }
+
+        $authorizationHeaders = $this->getAuthorizationHeaders($uri, $method, $signedBody, $contentType, $excludeBodyHeaders);
 
         $request = new Request($method, $uri, array_merge($header, $authorizationHeaders), $body);
 
@@ -289,10 +297,11 @@ final readonly class OciClient
         string $uri,
         string $method,
         ?string $body = null,
-        string $contentType = 'application/json'
+        string $contentType = 'application/json',
+        bool $excludeBodyHeaders = false
     ): array {
         $headers = [];
-        $strings = $this->signer->getHeaders($uri, $method, $body, $contentType);
+        $strings = $this->signer->getHeaders($uri, $method, $body, $contentType, null, $excludeBodyHeaders);
 
         foreach ($strings as $item) {
             [$name, $value] = explode(': ', $item, 2);

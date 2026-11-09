@@ -5,7 +5,10 @@ namespace LaravelOCI\LaravelOciDriver;
 use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\Exception\SignerValidateException;
 use LaravelOCI\LaravelOciDriver\Exception\SigningValidationFailedException;
+use LaravelOCI\LaravelOciDriver\KeyProvider\EnvironmentKeyProvider;
+use LaravelOCI\LaravelOciDriver\KeyProvider\FileKeyProvider;
 use LaravelOCI\LaravelOciDriver\KeyProvider\KeyProviderInterface;
+use OpenSSLAsymmetricKey;
 
 final class Signer
 {
@@ -39,22 +42,57 @@ final class Signer
 
     private string $ociPrivateKeyLocation;
 
-    /**
-     * @var array<string, string>
-     */
-    private array $headersToSign;
+    private ?KeyProviderInterface $keyProvider = null;
 
-    private KeyProviderInterface $keyProvider;
+    private ?string $passphrase = null;
+
+    private ?OpenSSLAsymmetricKey $parsedKey = null;
 
     /**
      * Signer constructor.
      */
     public function __construct(?string $ociTenancyId = null, ?string $ociUserId = null, ?string $keyFingerPrint = null, ?string $privateKeyLocation = null)
     {
-        $this->ociTenancyId = $ociTenancyId ?? config(self::OCI_TENANCY_ID) ?? '';
-        $this->ociUserId = $ociUserId ?? config(self::OCI_USER_ID) ?? '';
-        $this->ociKeyFingerPrint = $keyFingerPrint ?? config(self::OCI_KEY_FINGERPRINT) ?? '';
-        $this->ociPrivateKeyLocation = $privateKeyLocation ?? config(self::OCI_PRIVATE_KEY_FILENAME) ?? '';
+        $this->ociTenancyId = $ociTenancyId ?? '';
+        $this->ociUserId = $ociUserId ?? '';
+        $this->ociKeyFingerPrint = $keyFingerPrint ?? '';
+        $this->ociPrivateKeyLocation = $privateKeyLocation ?? '';
+    }
+
+    /**
+     * Build a signer from a connection config array.
+     *
+     * Key source precedence: private_key, private_key_base64, key_path.
+     *
+     * @param  array<string, mixed>  $config
+     *
+     * @throws PrivateKeyFileNotFoundException When no key source is configured or the base64 key is invalid
+     */
+    public static function fromConfig(array $config): self
+    {
+        $tenancy = (string) ($config['tenancy_id'] ?? '');
+        $user = (string) ($config['user_id'] ?? '');
+        $fingerprint = (string) ($config['key_fingerprint'] ?? '');
+        $passphrase = isset($config['passphrase']) && $config['passphrase'] !== '' ? (string) $config['passphrase'] : null;
+
+        $signer = new self($tenancy, $user, $fingerprint, (string) ($config['key_path'] ?? ''));
+        $signer->passphrase = $passphrase;
+
+        if (! empty($config['private_key'])) {
+            $signer->keyProvider = new EnvironmentKeyProvider((string) $config['private_key'], $tenancy, $user, $fingerprint);
+        } elseif (! empty($config['private_key_base64'])) {
+            $decoded = base64_decode((string) $config['private_key_base64'], true);
+            if ($decoded === false || $decoded === '') {
+                throw new PrivateKeyFileNotFoundException('(invalid private_key_base64)');
+            }
+            $signer->keyProvider = new EnvironmentKeyProvider($decoded, $tenancy, $user, $fingerprint);
+        } elseif (! empty($config['key_path'])) {
+            $signer->keyProvider = new FileKeyProvider((string) $config['key_path'], $tenancy, $user, $fingerprint);
+        } else {
+            throw new PrivateKeyFileNotFoundException('(no private_key, private_key_base64 or key_path configured)');
+        }
+
+        return $signer;
     }
 
     /**
@@ -64,14 +102,14 @@ final class Signer
      * @throws SignerValidateException
      * @throws SigningValidationFailedException
      */
-    public function getHeaders(string $url, string $method = 'GET', ?string $body = null, ?string $contentType = self::CONTENT_TYPE_APPLICATION_JSON, ?string $dateString = null): array
+    public function getHeaders(string $url, string $method = 'GET', ?string $body = null, ?string $contentType = self::CONTENT_TYPE_APPLICATION_JSON, ?string $dateString = null, bool $excludeBodyHeaders = false): array
     {
         $this->validateParameters($url);
 
-        $headersToSign = $this->getHeadersToSign($url, $method, $body, $contentType, $dateString);
-        $signingString = $this->getSigningString($url, $method, $body, $contentType, $dateString);
-        $privateKey = $this->getPrivateKey();
-        $signature = $this->calculateSignature($signingString, $privateKey);
+        $dateString ??= gmdate('D, d M Y H:i:s \G\M\T');
+        $headersToSign = $this->getHeadersToSign($url, $method, $body, $contentType, $dateString, $excludeBodyHeaders);
+        $signingString = $this->getSigningString($url, $method, $body, $contentType, $dateString, $excludeBodyHeaders);
+        $signature = $this->calculateSignature($signingString, $this->getParsedKey());
 
         $headers = [];
         foreach ($headersToSign as $headerName => $value) {
@@ -89,10 +127,9 @@ final class Signer
     /**
      * @throws SigningValidationFailedException
      */
-    public function calculateSignature(string $signingString, string $privateKey): string
+    public function calculateSignature(string $signingString, OpenSSLAsymmetricKey|string $privateKey): string
     {
-        // fetch private key from file and ready it
-        $privateKeyId = openssl_pkey_get_private($privateKey);
+        $privateKeyId = $privateKey instanceof OpenSSLAsymmetricKey ? $privateKey : $this->parsePrivateKey($privateKey);
 
         // compute signature
         $result = openssl_sign($signingString, $binarySignature, $privateKeyId, OPENSSL_ALGO_SHA256); // sha256WithRSAEncryption
@@ -118,9 +155,10 @@ final class Signer
         string $method = 'GET',
         ?string $body = null,
         ?string $contentType = self::CONTENT_TYPE_APPLICATION_JSON,
-        ?string $dateString = null
+        ?string $dateString = null,
+        bool $excludeBodyHeaders = false
     ): string {
-        $headersToSign = $this->getHeadersToSign($url, $method, $body, $contentType, $dateString);
+        $headersToSign = $this->getHeadersToSign($url, $method, $body, $contentType, $dateString, $excludeBodyHeaders);
         $signingHeaders = [];
         foreach ($headersToSign as $header => $value) {
             $signingHeaders[] = "$header: $value";
@@ -131,7 +169,7 @@ final class Signer
 
     public function getKeyId(): string
     {
-        if (isset($this->keyProvider)) {
+        if ($this->keyProvider !== null) {
             return $this->keyProvider->getKeyId();
         }
 
@@ -144,7 +182,7 @@ final class Signer
 
     public function getBodyHashBase64(?string $body): string
     {
-        $bodyHashBinary = hash('sha256', $body, true);
+        $bodyHashBinary = hash('sha256', $body ?? '', true);
 
         return base64_encode($bodyHashBinary);
     }
@@ -152,10 +190,10 @@ final class Signer
     /**
      * @return string[]
      */
-    public function getSigningHeadersNames(string $method): array
+    public function getSigningHeadersNames(string $method, bool $excludeBodyHeaders = false): array
     {
         $signingHeaders = $this->getGenericHeadersNames();
-        if ($this->shouldHashBody($method)) {
+        if (! $excludeBodyHeaders && $this->shouldHashBody($method)) {
             $bodyHeaders = $this->getBodyHeadersNames();
             $signingHeaders = array_merge($signingHeaders, $bodyHeaders);
         }
@@ -166,6 +204,7 @@ final class Signer
     public function setKeyProvider(KeyProviderInterface $keyProvider): void
     {
         $this->keyProvider = $keyProvider;
+        $this->parsedKey = null;
     }
 
     public function getAuthorizationHeader(string $keyId, string $signedHeaders, string $signatureBase64): string
@@ -174,52 +213,58 @@ final class Signer
     }
 
     /**
+     * Parse the private key once and cache it on the instance.
+     *
      * @throws PrivateKeyFileNotFoundException
+     * @throws SigningValidationFailedException
      */
-    private function getPrivateKey(): ?string
+    private function getParsedKey(): OpenSSLAsymmetricKey
     {
-        if (isset($this->keyProvider)) {
-            return $this->keyProvider->getPrivateKey();
+        if ($this->parsedKey === null) {
+            $provider = $this->keyProvider ?? new FileKeyProvider(
+                $this->ociPrivateKeyLocation,
+                $this->ociTenancyId,
+                $this->ociUserId,
+                $this->ociKeyFingerPrint,
+            );
+            $this->parsedKey = $this->parsePrivateKey($provider->getPrivateKey());
         }
 
-        if ($this->ociPrivateKeyLocation) {
-            if (filter_var($this->ociPrivateKeyLocation, FILTER_VALIDATE_URL)) {
-                return file_get_contents($this->ociPrivateKeyLocation);
-            }
+        return $this->parsedKey;
+    }
 
-            if (! file_exists($this->ociPrivateKeyLocation)) {
-                throw new PrivateKeyFileNotFoundException("Private key file does not exist: $this->ociPrivateKeyLocation");
-            }
-
-            return file_get_contents($this->ociPrivateKeyLocation);
+    /**
+     * @throws SigningValidationFailedException
+     */
+    private function parsePrivateKey(string $pem): OpenSSLAsymmetricKey
+    {
+        $key = openssl_pkey_get_private($pem, $this->passphrase ?? '');
+        if ($key === false) {
+            throw new SigningValidationFailedException('Cannot parse private key.');
         }
 
-        return null;
+        return $key;
     }
 
     private function shouldHashBody(string $method): bool
     {
-        return in_array($method, ['POST', 'PUT', 'PATCH']);
+        return in_array(strtoupper($method), ['POST', 'PUT', 'PATCH'], true);
     }
 
     /**
      * @return array<string, string>
      */
-    private function getHeadersToSign(string $url, string $method, ?string $body, ?string $contentType, ?string $dateString = null): array
+    private function getHeadersToSign(string $url, string $method, ?string $body, ?string $contentType, ?string $dateString = null, bool $excludeBodyHeaders = false): array
     {
-        if (isset($this->headersToSign)) {
-            return $this->headersToSign;
-        }
-
         $parsed = parse_url($url);
 
         $headersMap = [];
-        $headersNames = $this->getSigningHeadersNames($method);
+        $headersNames = $this->getSigningHeadersNames($method, $excludeBodyHeaders);
         foreach ($headersNames as $headerName) {
             switch ($headerName) {
                 case self::SIGNING_HEADER_DATE:
                     if (! $dateString) {
-                        $dateString = gmdate(DATE_RFC7231);
+                        $dateString = gmdate('D, d M Y H:i:s \G\M\T');
                     }
                     $headersMap[self::SIGNING_HEADER_DATE] = $dateString;
                     break;
@@ -238,7 +283,7 @@ final class Signer
                     $headersMap[self::SIGNING_HEADER_CONTENT_LENGTH] = $contentLength;
                     break;
                 case self::SIGNING_HEADER_CONTENT_TYPE:
-                    $headersMap[self::SIGNING_HEADER_CONTENT_TYPE] = $contentType;
+                    $headersMap[self::SIGNING_HEADER_CONTENT_TYPE] = $contentType ?? '';
                     break;
                 case self::SIGNING_HEADER_X_CONTENT_SHA256:
                     $bodyHashBase64 = $this->getBodyHashBase64($body);
@@ -249,9 +294,7 @@ final class Signer
             }
         }
 
-        $this->headersToSign = $headersMap;
-
-        return $this->headersToSign;
+        return $headersMap;
     }
 
     /**
@@ -288,7 +331,7 @@ final class Signer
             throw new SignerValidateException("URL is invalid: $url");
         }
 
-        if (isset($this->keyProvider)) {
+        if ($this->keyProvider !== null) {
             return;
         }
 
@@ -301,13 +344,10 @@ final class Signer
             throw new SignerValidateException('OCI User ID, tenancy ID, key fingerprint and private key filename are required.');
         }
 
-        if (! filter_var($this->ociPrivateKeyLocation, FILTER_VALIDATE_URL) && ! file_exists($this->ociPrivateKeyLocation)) {
-            throw new PrivateKeyFileNotFoundException("Private key file does not exist: $this->ociPrivateKeyLocation");
-        }
     }
 
     private function getContentLength(?string $body): int
     {
-        return strlen($body);
+        return strlen($body ?? '');
     }
 }

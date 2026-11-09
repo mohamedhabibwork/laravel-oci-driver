@@ -37,6 +37,10 @@ final readonly class FileKeyProvider implements KeyProviderInterface
      */
     public function getPrivateKey(): string
     {
+        if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $this->keyPath) === 1) {
+            throw PrivateKeyFileNotFoundException::invalidPath($this->keyPath);
+        }
+
         if (! file_exists($this->keyPath)) {
             throw PrivateKeyFileNotFoundException::invalidPath($this->keyPath);
         }
