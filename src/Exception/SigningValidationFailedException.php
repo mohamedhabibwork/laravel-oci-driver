@@ -49,7 +49,7 @@ final class SigningValidationFailedException extends Exception
     {
         $message = 'Failed to verify OCI request signature. The generated signature could not be validated against the public key.';
 
-        return new static($message, $previous);
+        return new self($message, $previous);
     }
 
     /**
@@ -61,7 +61,7 @@ final class SigningValidationFailedException extends Exception
     {
         $message = 'Invalid OCI private key format. Please ensure the private key is in valid PEM format.';
 
-        return new static($message, $previous);
+        return new self($message, $previous);
     }
 
     /**
@@ -77,6 +77,6 @@ final class SigningValidationFailedException extends Exception
             $operation
         );
 
-        return new static($message, $previous);
+        return new self($message, $previous);
     }
 }

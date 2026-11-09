@@ -127,6 +127,6 @@ final readonly class EnvironmentKeyProvider implements KeyProviderInterface
             throw new \InvalidArgumentException('Invalid base64-encoded private key');
         }
 
-        return new static($privateKeyContent, $tenancyId, $userId, $fingerprint);
+        return new self($privateKeyContent, $tenancyId, $userId, $fingerprint);
     }
 }

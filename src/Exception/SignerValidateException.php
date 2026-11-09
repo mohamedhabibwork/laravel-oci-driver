@@ -54,7 +54,7 @@ final class SignerValidateException extends Exception
     {
         $message = sprintf('Invalid URL provided for OCI request: %s', $url);
 
-        return new static($message, $previous);
+        return new self($message, $previous);
     }
 
     /**
@@ -70,6 +70,6 @@ final class SignerValidateException extends Exception
             $fingerprint
         );
 
-        return new static($message, $previous);
+        return new self($message, $previous);
     }
 }

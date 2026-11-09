@@ -7,6 +7,7 @@ namespace LaravelOCI\LaravelOciDriver\Tests\Unit;
 use LaravelOCI\LaravelOciDriver\Exception\PrivateKeyFileNotFoundException;
 use LaravelOCI\LaravelOciDriver\KeyProvider\EnvironmentKeyProvider;
 use LaravelOCI\LaravelOciDriver\KeyProvider\FileKeyProvider;
+use LaravelOCI\LaravelOciDriver\KeyProvider\KeyProviderInterface;
 use LaravelOCI\LaravelOciDriver\Tests\TestCase;
 
 final class KeyProviderTest extends TestCase
@@ -157,8 +158,8 @@ final class KeyProviderTest extends TestCase
         $fileProvider = new FileKeyProvider('/test', 'tenancy', 'user', 'fingerprint');
         $envProvider = new EnvironmentKeyProvider('content', 'tenancy', 'user', 'fingerprint');
 
-        expect($fileProvider)->toBeInstanceOf(\LaravelOCI\LaravelOciDriver\KeyProvider\KeyProviderInterface::class);
-        expect($envProvider)->toBeInstanceOf(\LaravelOCI\LaravelOciDriver\KeyProvider\KeyProviderInterface::class);
+        expect($fileProvider)->toBeInstanceOf(KeyProviderInterface::class);
+        expect($envProvider)->toBeInstanceOf(KeyProviderInterface::class);
     }
 
     public function test_key_providers_are_readonly(): void

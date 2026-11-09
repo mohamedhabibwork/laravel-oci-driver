@@ -57,7 +57,7 @@ final class PrivateKeyFileNotFoundException extends Exception
             $keyPath
         );
 
-        $exception = new static($keyPath, $previous);
+        $exception = new self($keyPath, $previous);
         $exception->message = $message;
 
         return $exception;

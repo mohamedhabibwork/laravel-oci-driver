@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace LaravelOCI\LaravelOciDriver\Tests\Feature;
 
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
+use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\LaravelOciDriver;
+use LaravelOCI\LaravelOciDriver\OciClient;
 use LaravelOCI\LaravelOciDriver\Tests\TestCase;
 
 final class LaravelOciDriverTest extends TestCase
@@ -15,14 +18,14 @@ final class LaravelOciDriverTest extends TestCase
     {
         $disk = LaravelOciDriver::disk();
 
-        expect($disk)->toBeInstanceOf(\Illuminate\Contracts\Filesystem\Filesystem::class);
+        expect($disk)->toBeInstanceOf(Filesystem::class);
     }
 
     public function test_driver_can_get_specific_disk(): void
     {
         $disk = LaravelOciDriver::disk('oci');
 
-        expect($disk)->toBeInstanceOf(\Illuminate\Contracts\Filesystem\Filesystem::class);
+        expect($disk)->toBeInstanceOf(Filesystem::class);
     }
 
     public function test_driver_can_create_temporary_url(): void
@@ -33,7 +36,7 @@ final class LaravelOciDriverTest extends TestCase
         $path = 'test-file.txt';
         $expiresAt = now()->addHour();
 
-        $url = \LaravelOCI\LaravelOciDriver\LaravelOciDriver::temporaryUrl($path, $expiresAt);
+        $url = LaravelOciDriver::temporaryUrl($path, $expiresAt);
 
         expect($url)->toBeString();
         expect($url)->toContain($path);
@@ -260,7 +263,7 @@ final class LaravelOciDriverTest extends TestCase
             'url_path_prefix' => $prefix,
             'storage_tier' => 'Standard',
         ];
-        $client = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($config);
+        $client = OciClient::createWithConfiguration($config);
         $filePath = 'test-file.txt';
         $expected = $prefix.'/'.$filePath;
         $actual = $client->getPrefixedPath($filePath);
@@ -290,7 +293,7 @@ final class LaravelOciDriverTest extends TestCase
                 'storage_tier' => 'Standard',
             ];
 
-            $client = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($config);
+            $client = OciClient::createWithConfiguration($config);
             $actual = $client->getPrefixedPath($case['path']);
             expect($actual)->toBe($case['expected']);
         }
@@ -310,7 +313,7 @@ final class LaravelOciDriverTest extends TestCase
             'storage_tier' => 'Standard',
         ];
 
-        $client = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($config);
+        $client = OciClient::createWithConfiguration($config);
 
         // Test removing prefix from paths
         expect($client->removePrefixFromPath('app/uploads/file.txt'))->toBe('file.txt');
@@ -334,7 +337,7 @@ final class LaravelOciDriverTest extends TestCase
             'storage_tier' => 'Standard',
         ];
 
-        $clientWithPrefix = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($configWithPrefix);
+        $clientWithPrefix = OciClient::createWithConfiguration($configWithPrefix);
         expect($clientWithPrefix->isPrefixEnabled())->toBeTrue();
         expect($clientWithPrefix->getPrefix())->toBe('my-prefix');
 
@@ -350,7 +353,7 @@ final class LaravelOciDriverTest extends TestCase
             'storage_tier' => 'Standard',
         ];
 
-        $clientWithoutPrefix = \LaravelOCI\LaravelOciDriver\OciClient::createWithConfiguration($configWithoutPrefix);
+        $clientWithoutPrefix = OciClient::createWithConfiguration($configWithoutPrefix);
         expect($clientWithoutPrefix->isPrefixEnabled())->toBeFalse();
         expect($clientWithoutPrefix->getPrefix())->toBe('');
     }
@@ -369,8 +372,8 @@ final class LaravelOciDriverTest extends TestCase
             'storage_tier' => 'Standard',
         ];
 
-        $ociConfig = new \LaravelOCI\LaravelOciDriver\Config\OciConfig($configArray);
-        $client = \LaravelOCI\LaravelOciDriver\OciClient::fromOciConfig($ociConfig);
+        $ociConfig = new OciConfig($configArray);
+        $client = OciClient::fromOciConfig($ociConfig);
 
         expect($client->isPrefixEnabled())->toBeTrue();
         expect($client->getPrefix())->toBe('config-prefix');

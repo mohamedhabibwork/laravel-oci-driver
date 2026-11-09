@@ -43,7 +43,7 @@ describe('OciClient', function () {
     it('validates required configuration keys', function () {
         $incompleteConfig = ['bucket' => 'test-bucket'];
         expect(fn () => OciClient::createWithConfiguration($incompleteConfig))
-            ->toThrow(\InvalidArgumentException::class);
+            ->toThrow(InvalidArgumentException::class);
     });
 
     describe('prefix functionality', function () {
