@@ -783,6 +783,14 @@ final readonly class OciAdapter implements FilesystemAdapter
     }
 
     /**
+     * Get the underlying OCI client.
+     */
+    public function getClient(): OciClient
+    {
+        return $this->client;
+    }
+
+    /**
      * Get a public URL for a file
      *
      * @param  string  $path  File path
@@ -790,23 +798,19 @@ final readonly class OciAdapter implements FilesystemAdapter
      */
     public function getUrl($path): string
     {
-        // https://objectstorage.{reg}.oraclecloud.com/n/{namespace}/b/{bucket}/o/{path}
-        $namespace = $this->client->getNamespace();
-        $bucket = $this->client->getBucket();
-        $prefixedPath = $this->client->getPrefixedPath($path);
-
-        return "https://objectstorage.{$this->client->getRegion()}.oraclecloud.com/n/{$namespace}/b/{$bucket}/o/{$prefixedPath}";
+        return $this->client->getObjectUrl($path);
     }
 
     /**
      * Create a temporary URL for a file
      *
      * @param  string  $path  File path
-     * @param  Carbon|null  $expiresAt  Expiration time (defaults to 1 hour from now)
-     * @return string Temporary URL or empty string if creation failed
+     * @param  Carbon|null  $expiresAt  Expiration time (defaults to the configured default expiry)
+     * @param  array{access_type?: string}  $options
+     * @return string Temporary URL
      */
-    public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null): string
+    public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null, array $options = []): string
     {
-        return $this->client->createTemporaryUrl($path, $expiresAt);
+        return $this->client->createTemporaryUrl($path, $expiresAt, $options);
     }
 }

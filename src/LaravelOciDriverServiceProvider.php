@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Storage;
 use LaravelOCI\LaravelOciDriver\Commands\LaravelOciDriverCommand;
 use LaravelOCI\LaravelOciDriver\Commands\OciConfigCommand;
 use LaravelOCI\LaravelOciDriver\Commands\OciConnectionCommand;
+use LaravelOCI\LaravelOciDriver\Commands\OciParPruneCommand;
 use LaravelOCI\LaravelOciDriver\Commands\OciSetupCommand;
 use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use League\Flysystem\Filesystem;
@@ -37,6 +38,7 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
                 LaravelOciDriverCommand::class,
                 OciConfigCommand::class,
                 OciConnectionCommand::class,
+                OciParPruneCommand::class,
                 OciSetupCommand::class,
             ])
             ->hasInstallCommand(function (InstallCommand $command) {
@@ -128,7 +130,7 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
             array $options = []
         ) use ($client): string {
             try {
-                return $client->createTemporaryUrl($path, Carbon::instance($expiresAt));
+                return $client->createTemporaryUrl($path, Carbon::instance($expiresAt), $options);
             } catch (\Exception $e) {
                 // Log the error if logging is available
                 if (app()->bound('log')) {

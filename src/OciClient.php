@@ -7,7 +7,6 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Pool;
 use GuzzleHttp\Psr7\Request;
-use Illuminate\Support\Facades\Log;
 use LaravelOCI\LaravelOciDriver\Config\OciConfig;
 use LaravelOCI\LaravelOciDriver\Enums\StorageTier;
 use LaravelOCI\LaravelOciDriver\Exception\OciRequestFailed;
@@ -25,6 +24,9 @@ use Ramsey\Uuid\Uuid;
 final readonly class OciClient
 {
     /** Object fields requested on listings. */
+    /** Name prefix of PARs created by this package (used by the prune command). */
+    public const PAR_NAME_PREFIX = 'laravel-oci-';
+
     public const LIST_FIELDS = 'name,size,timeCreated,timeModified,md5,storageTier';
 
     /**
@@ -176,6 +178,14 @@ final readonly class OciClient
     }
 
     /**
+     * Get the public URL of an object.
+     */
+    public function getObjectUrl(string $path): string
+    {
+        return $this->getObjectUri($this->applyPathPrefix($path));
+    }
+
+    /**
      * Get the configured prefix.
      */
     public function getPrefix(): string
@@ -197,41 +207,73 @@ final readonly class OciClient
     }
 
     /**
-     * Create a temporary URL for a file.
+     * Create a temporary URL (pre-authenticated request) for an object.
+     *
+     * @param  array{access_type?: string}  $options
+     *
+     * @throws \InvalidArgumentException When the expiry is not in the future
+     * @throws OciRequestFailed When OCI rejects the request
      */
-    public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null): string
+    public function createTemporaryUrl(string $path, ?Carbon $expiresAt = null, array $options = []): string
     {
-        $uri = sprintf('%s/p/', $this->getBucketUri());
-        $expiresAt ??= now()->addHour();
+        $now = Carbon::now();
+        $config = $this->getOciConfig();
+        $maxExpiresAt = $now->copy()->addSeconds((int) $config->get('temporary_url.max_expiry', 86400));
 
-        $bodyData = [
-            'accessType' => 'ObjectRead',
-            'name' => Uuid::uuid7()->toString(),
+        $expiresAt ??= $now->copy()->addSeconds((int) $config->get('temporary_url.default_expiry', 3600));
+
+        if ($expiresAt->lessThanOrEqualTo($now)) {
+            throw new \InvalidArgumentException('The temporary URL expiry must be in the future.');
+        }
+
+        if ($expiresAt->greaterThan($maxExpiresAt)) {
+            $expiresAt = $maxExpiresAt;
+        }
+
+        $body = json_encode([
+            'name' => self::PAR_NAME_PREFIX.Uuid::uuid7()->toString(),
             'objectName' => $this->applyPathPrefix($path),
-            'timeExpires' => $expiresAt->toIso8601String(),
-        ];
+            'accessType' => $options['access_type'] ?? 'ObjectRead',
+            'timeExpires' => $expiresAt->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+        ], JSON_THROW_ON_ERROR);
 
-        $body = json_encode($bodyData);
-        if ($body === false) {
-            throw new \RuntimeException('Failed to encode request body to JSON');
-        }
+        $response = ResponseGuard::ok($this->send($this->getBucketUri().'/p/', 'POST', [], $body), 'create temporary URL');
+        $created = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
 
-        try {
-            $response = $this->send($uri, 'POST', [], $body);
+        return $this->getHost().$created['accessUri'];
+    }
 
-            if ($response->getStatusCode() === 200) {
-                $preAuthenticatedRequest = json_decode($response->getBody()->getContents());
+    /**
+     * List one page of pre-authenticated requests on the bucket.
+     *
+     * @return array{items: list<array<string, mixed>>, next: ?string}
+     *
+     * @throws OciRequestFailed
+     */
+    public function listPreAuthenticatedRequests(?string $page = null): array
+    {
+        $uri = $this->getBucketUri().'/p/?limit=1000'.($page !== null ? '&page='.rawurlencode($page) : '');
+        $response = ResponseGuard::ok($this->send($uri, 'GET'), 'list pre-authenticated requests');
+        $items = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $next = $response->getHeaderLine('opc-next-page');
 
-                return $preAuthenticatedRequest->fullPath;
-            }
-        } catch (GuzzleException $exception) {
-            Log::error('Failed to create temporary URL', [
-                'path' => $path,
-                'exception' => $exception->getMessage(),
-            ]);
-        }
+        return ['items' => is_array($items) ? array_values($items) : [], 'next' => $next !== '' ? $next : null];
+    }
 
-        return '';
+    /**
+     * Delete a pre-authenticated request by id.
+     *
+     * @throws OciRequestFailed
+     */
+    public function deletePreAuthenticatedRequest(string $id): void
+    {
+        ResponseGuard::ok(
+            $this->send($this->getBucketUri().'/p/'.rawurlencode($id), 'DELETE'),
+            'delete pre-authenticated request',
+            200,
+            204,
+            404,
+        );
     }
 
     /**
