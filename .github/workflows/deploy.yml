@@ -24,13 +24,6 @@ jobs:
       should-deploy: ${{ steps.validation.outputs.should-deploy }}
       version: ${{ steps.validation.outputs.version }}
     steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -98,13 +91,6 @@ jobs:
     environment: production
 
     steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -169,13 +155,6 @@ jobs:
     if: always() && needs.validate-release.outputs.should-deploy == 'true'
 
     steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
       - name: Notify success
         if: needs.deploy-packagist.result == 'success'
         run: |

@@ -26,13 +26,6 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -74,13 +67,6 @@ jobs:
     if: github.event_name == 'pull_request'
 
     steps:
-      - name: Check config exists
-        run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -103,12 +89,8 @@ jobs:
       matrix:
         language: [php]
     steps:
-      - name: Check config and token exists
+      - name: Check token exists
         run: |
-          if [ ! -f config/laravel-oci-driver.php ]; then
-            echo "Config file missing, skipping job."
-            exit 78
-          fi
           if [ -z "${{ secrets.CODEQL_TOKEN }}" ]; then
             echo "CODEQL_TOKEN secret missing, skipping job."
             exit 78
