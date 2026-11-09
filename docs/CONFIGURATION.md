@@ -1,601 +1,156 @@
 # Configuration Guide
 
-This guide provides a comprehensive reference for all configuration options available in the Laravel OCI Driver.
+This guide lists every configuration key the driver reads. Keys that exist in the published config file but are not read by the code are listed separately as "reserved / currently unused".
 
 ---
 
-## Introduction
+## How configuration is resolved
 
-The Laravel OCI Driver requires several configuration options to connect to Oracle Cloud Infrastructure Object Storage. Configuration can be set via Laravel's `config/filesystems.php`, the package config, and environment variables.
+Each `oci` disk in `config/filesystems.php` is built from **that disk's own array**. Nothing is read implicitly from other disks.
 
----
-
-## Configuration Options
-
-| Option             | Description                                      | Example                            |
-|--------------------|--------------------------------------------------|------------------------------------|
-| `driver`           | Storage driver (must be 'oci')                  | `oci`                              |
-| `tenancy_id`       | Oracle Cloud tenancy OCID                       | `ocid1.tenancy.oc1..abcd...`       |
-| `user_id`          | Oracle Cloud user OCID                          | `ocid1.user.oc1..efgh...`          |
-| `key_fingerprint`  | API key fingerprint                              | `aa:bb:cc:dd:ee:ff:...`            |
-| `key_path`         | Path to private key file                         | `/path/to/private-key.pem`         |
-| `namespace`        | Object Storage namespace                         | `my-namespace`                     |
-| `region`           | OCI region identifier                            | `us-phoenix-1`                     |
-| `bucket`           | Object Storage bucket name                       | `my-bucket`                        |
-| `storage_tier`     | Default storage tier                             | `Standard`                         |
-| `timeout`          | Request timeout in seconds                       | `30`                               |
-| `connect_timeout`  | Connection timeout in seconds                    | `10`                               |
-| `retry_attempts`   | Number of retry attempts                         | `3`                                |
-| `retry_delay`      | Delay between retries (milliseconds)             | `1000`                             |
-| `prefix`           | Prefix for all stored files                      | `backups/`                         |
-| `url`              | Custom endpoint URL                              |                                    |
-| `passphrase`       | Passphrase for private key (if encrypted)        |                                    |
-| `options`          | Advanced options (timeouts, retries, etc.)       | See below                          |
-| `debug`            | Enable debug logging                             | `true`                             |
-| `log_level`        | Log verbosity                                    | `info`                             |
-| `log_channel`      | Laravel log channel                              | `default`                          |
-| `url_path_prefix`  | URL path prefix for object paths                  | `my-prefix`                        |
-
-## URL Path Prefix Configuration
-
-The `url_path_prefix` option allows you to organize all files under a specific prefix in your OCI bucket. This feature is particularly useful for:
-
-### Use Cases
-
-1. **Multi-tenant Applications**: Isolate files for different tenants
-   ```php
-   'url_path_prefix' => 'tenant-' . auth()->user()->tenant_id,
-   ```
-
-2. **Environment Separation**: Separate files by environment
-   ```php
-   'url_path_prefix' => env('APP_ENV', 'production'),
-   ```
-
-3. **Application Organization**: Organize files by application or module
-   ```php
-   'url_path_prefix' => 'app-name/uploads',
-   ```
-
-4. **Version Control**: Separate files by API or application version
-   ```php
-   'url_path_prefix' => 'v1/files',
-   ```
-
-5. **Date-based Organization**: Organize files by date
-   ```php
-   'url_path_prefix' => 'backups/' . date('Y/m'),
-   ```
-
-### Prefix Behavior
-
-- **Normalization**: Leading and trailing slashes are automatically normalized
-- **Empty Values**: Empty string or null disables prefixing
-- **Path Handling**: All file operations automatically apply the prefix
-
-### Examples
-
-```php
-// Basic prefix
-'url_path_prefix' => 'uploads'
-// Files stored as: uploads/file.txt, uploads/images/photo.jpg
-
-// Nested prefix
-'url_path_prefix' => 'app/documents'
-// Files stored as: app/documents/file.txt, app/documents/reports/report.pdf
-
-// Dynamic prefix (configure in service provider)
-'url_path_prefix' => config('app.name') . '/' . config('app.env')
-// Files stored as: myapp/production/file.txt
-
-// Date-based prefix
-'url_path_prefix' => 'backups/' . date('Y/m/d')
-// Files stored as: backups/2024/03/15/backup.sql
-```
-
-### Prefix Normalization
-
-The system automatically normalizes prefixes:
-
-```php
-'url_path_prefix' => 'uploads'      // Becomes: uploads/
-'url_path_prefix' => '/uploads'     // Becomes: uploads/
-'url_path_prefix' => 'uploads/'     // Becomes: uploads/
-'url_path_prefix' => '/uploads/'    // Becomes: uploads/
-'url_path_prefix' => ''             // No prefix applied
-'url_path_prefix' => null           // No prefix applied
-```
-
-### Advanced Usage
-
-For dynamic prefixes, you can configure them in your service provider:
-
-```php
-// In AppServiceProvider::boot()
-public function boot()
-{
-    // Dynamic tenant-based prefix
-    if (auth()->check()) {
-        config(['filesystems.disks.oci.url_path_prefix' => 'tenant-' . auth()->user()->tenant_id]);
-    }
-    
-    // Environment-based prefix
-    config(['filesystems.disks.oci.url_path_prefix' => config('app.env') . '/files']);
-}
-```
-
-**Advanced `options` example:**
-```php
-'options' => [
-    'timeout' => 30,
-    'connect_timeout' => 10,
-    'retry_max' => 3,
-    'chunk_size' => 8388608, // 8MB
-    'verify_ssl' => true,
-    'connection_pool_size' => 10,
-    'parallel_uploads' => 4,
-    'cache_metadata' => true,
-    'cache_ttl' => 3600,
-],
-```
-
----
-
-## Example Configuration
-
-**config/filesystems.php**
-```php
-'oci' => [
-    'driver' => 'oci',
-    'namespace' => env('OCI_NAMESPACE'),
-    'region' => env('OCI_REGION'),
-    'bucket' => env('OCI_BUCKET'),
-    'tenancy_id' => env('OCI_TENANCY_OCID'),
-    'user_id' => env('OCI_USER_OCID'),
-    'storage_tier' => env('OCI_STORAGE_TIER', 'Standard'),
-    'key_fingerprint' => env('OCI_FINGERPRINT'),
-    'key_path' => env('OCI_PRIVATE_KEY_PATH'),
-    'url_path_prefix' => env('OCI_PREFIX', ''), // Optional prefix
-    'options' => [
-        'timeout' => 30,
-        'connect_timeout' => 10,
-        'retry_max' => 3,
-        'chunk_size' => 8388608,
-    ],
-    'debug' => env('OCI_DEBUG', false),
-    'log_level' => env('OCI_LOG_LEVEL', 'info'),
-],
-```
-
-**.env**
-```env
-OCI_NAMESPACE=my-namespace
-OCI_REGION=us-phoenix-1
-OCI_BUCKET=my-bucket
-OCI_TENANCY_OCID=ocid1.tenancy.oc1..abcd...
-OCI_USER_OCID=ocid1.user.oc1..efgh...
-OCI_FINGERPRINT=aa:bb:cc:dd:ee:ff:...
-OCI_PRIVATE_KEY_PATH=/path/to/private-key.pem
-OCI_STORAGE_TIER=Standard
-OCI_PREFIX=uploads
-OCI_DEBUG=false
-OCI_LOG_LEVEL=info
-```
-
-## Multi-Environment Configuration
-
-You can configure different prefixes for different environments:
-
-```php
-// config/filesystems.php
-'oci' => [
-    // ... other config
-    'url_path_prefix' => env('OCI_PREFIX', config('app.env')),
-],
-
-// Different .env files
-// .env.production
-OCI_PREFIX=production
-
-// .env.staging  
-OCI_PREFIX=staging
-
-// .env.development
-OCI_PREFIX=development
-```
-
-## Multi-Tenant Configuration
-
-For multi-tenant applications, you can set dynamic prefixes:
-
-```php
-// In a service provider or middleware
-public function handle($request, Closure $next)
-{
-    if (auth()->check()) {
-        $tenantId = auth()->user()->tenant_id;
-        config(['filesystems.disks.oci.url_path_prefix' => "tenant-{$tenantId}"]);
-    }
-    
-    return $next($request);
-}
-```
-
-This ensures all file operations for the authenticated user are automatically prefixed with their tenant ID, providing complete isolation between tenants.
-
----
-
-## Environment Variable Mapping
-
-| Config Key         | Environment Variable      |
-|--------------------|--------------------------|
-| `namespace`        | `OCI_NAMESPACE`          |
-| `region`           | `OCI_REGION`             |
-| `bucket`           | `OCI_BUCKET`             |
-| `tenancy_id`       | `OCI_TENANCY_OCID`       |
-| `user_id`          | `OCI_USER_OCID`          |
-| `storage_tier`     | `OCI_STORAGE_TIER`       |
-| `key_fingerprint`  | `OCI_FINGERPRINT`        |
-| `key_path`         | `OCI_PRIVATE_KEY_PATH`   |
-| `debug`            | `OCI_DEBUG`              |
-| `log_level`        | `OCI_LOG_LEVEL`          |
-
----
-
-## Advanced Configuration Options
-
-### Performance Tuning
-
-```php
-'connections' => [
-    'default' => [
-        // These connection-level settings are read by the driver.
-        'timeout' => 60,
-        'connect_timeout' => 30,
-        'retry_attempts' => 5,
-        'retry_delay' => 1000, // milliseconds
-        'upload' => [
-            'chunk_size' => 8388608, // 8 MB
-            'multipart_threshold' => 104857600, // 100 MB
-        ],
-        'cache' => [
-            'enabled' => true,
-            'ttl' => 3600, // seconds
-            'prefix' => 'oci_metadata',
-        ],
-    ],
-],
-```
-
-### Logging Configuration
-
-```php
-'oci' => [
-    'driver' => 'oci',
-    // ... other config
-    'logging' => [
-        'enabled' => env('OCI_LOGGING_ENABLED', true),
-        'level' => env('OCI_LOG_LEVEL', 'info'),
-        'channel' => env('OCI_LOG_CHANNEL', 'oci'),
-        'log_requests' => env('OCI_LOG_REQUESTS', false),
-        'log_responses' => env('OCI_LOG_RESPONSES', false),
-        'log_metadata' => env('OCI_LOG_METADATA', true),
-    ],
-],
-```
-
-### Health Check Configuration
-
-```php
-'oci' => [
-    'driver' => 'oci',
-    // ... other config
-    'health_check' => [
-        'enabled' => env('OCI_HEALTH_CHECK_ENABLED', true),
-        'test_file' => 'health-check.txt',
-        'test_content' => 'Laravel OCI Driver Health Check',
-        'timeout' => 30,
-        'cache_results' => true,
-        'cache_ttl' => 300, // 5 minutes
-    ],
-],
-```
-
----
-
-## Connection Management
-
-### Multiple Connection Configuration
+If the disk sets `'connection' => 'name'`, the values of `laravel-oci-driver.connections.name` are merged underneath the disk values (the disk wins). Use this to share credentials between disks and override only the bucket:
 
 ```php
 // config/filesystems.php
 'disks' => [
-    'oci_primary' => [
+    'oci' => [
         'driver' => 'oci',
-        'region' => 'us-phoenix-1',
-        'bucket' => 'primary-storage',
-        // ... other config
+        'connection' => 'default',            // inherit laravel-oci-driver.connections.default
     ],
-    
-    'oci_backup' => [
+    'oci_backups' => [
         'driver' => 'oci',
-        'region' => 'us-ashburn-1',
-        'bucket' => 'backup-storage',
-        'storage_tier' => 'Archive',
-        // ... other config
-    ],
-    
-    'oci_cdn' => [
-        'driver' => 'oci',
-        'region' => 'eu-frankfurt-1',
-        'bucket' => 'cdn-assets',
-        'visibility' => 'public',
-        // ... other config
+        'connection' => 'default',
+        'bucket' => 'my-backups',             // override
+        'url_path_prefix' => 'backups',
+        'storage_tier' => 'InfrequentAccess',
     ],
 ],
 ```
 
-### Using Multiple Connections
+A connection that exists only under `laravel-oci-driver.connections` and has no matching `filesystems.disks` entry is **not usable**: `Storage::disk()`, `LaravelOciDriver::connection()` and the Artisan commands all need a filesystem disk with `'driver' => 'oci'`. `LaravelOciDriver::connection('x')` resolves the disk named `x`, then falls back to `oci_x`.
 
-```php
-use LaravelOCI\LaravelOciDriver\Config\OciConfig;
-use LaravelOCI\LaravelOciDriver\LaravelOciDriver;
+### Validation
 
-// List configured connection names
-$connections = OciConfig::getAvailableConnections();
+When a disk is built, these must be non-empty: `namespace`, `region`, `bucket`, `tenancy_id`, `user_id`, `key_fingerprint`, and at least one key source (`private_key`, `private_key_base64` or `key_path`). A missing value throws an `InvalidArgumentException` naming the disk and the missing keys. Check a disk with:
 
-// Test every configured connection
-$results = LaravelOciDriver::testMultipleConnections($connections);
-
-// Read and validate a named connection
-$config = OciConfig::fromConnection('production');
-$errors = $config->validate();
-
-// Use a named connection
-$storage = LaravelOciDriver::connection('backup');
+```bash
+php artisan oci:config --validate --disk=oci_backups
 ```
 
 ---
 
-## Environment-Specific Configurations
+## Required keys
 
-### Development Environment
+| Key | Description | Example |
+|---|---|---|
+| `driver` | Must be `oci` | `oci` |
+| `tenancy_id` | Tenancy OCID | `ocid1.tenancy.oc1..aaaa` |
+| `user_id` | User OCID | `ocid1.user.oc1..bbbb` |
+| `key_fingerprint` | API key fingerprint | `aa:bb:cc:...` |
+| `namespace` | Object Storage namespace | `mytenancyns` |
+| `region` | Region identifier | `me-jeddah-1` |
+| `bucket` | Bucket name | `my-bucket` |
+| key source | One of the three below | see below |
+
+### Key sources
+
+The signer picks the first one that is set, in this order:
+
+1. `private_key` – the PEM contents as a string (for example from a secret manager).
+2. `private_key_base64` – the PEM, base64-encoded (convenient for single-line env vars).
+3. `key_path` – a local filesystem path to the PEM file. URLs are rejected.
+
+`passphrase` is used when the key is encrypted.
+
+---
+
+## Optional keys
+
+| Key | Default | Description |
+|---|---|---|
+| `connection` | – | Name under `laravel-oci-driver.connections` to inherit values from |
+| `storage_tier` | `Standard` | Default tier for writes: `Standard`, `InfrequentAccess`, `Archive` |
+| `url_path_prefix` | `''` | Prefix applied to every object name (see below) |
+| `timeout` | `30` | Request timeout, seconds |
+| `connect_timeout` | `10` | Connect timeout, seconds |
+| `retry_attempts` | `3` | Retries for connection errors, 429 and 5xx |
+| `retry_delay` | `1000` | First retry delay in ms; backs off exponentially |
+| `delete_concurrency` | `10` | Parallel DELETE requests for `deleteDirectory` / bulk delete |
+| `copy_timeout` | `300` | Seconds to wait for an async copy work request |
+| `copy_poll_interval` | `1000` | Milliseconds between work request polls |
+| `visibility` | `private` | Value reported by `visibility()` when no `visibility_mapping` is set |
+| `visibility_mapping` | `null` | Opt-in map of visibility name to storage tier (see README) |
+| `upload.multipart_threshold` | `104857600` (100 MiB) | Streams larger than this, or of unknown size, use multipart |
+| `upload.chunk_size` | `33554432` (32 MiB) | Multipart part size. Values below 10 MiB (`10485760`) are raised to 10 MiB, the OCI part minimum |
+| `upload.enable_checksum` | `true` | Send `Content-MD5` on single-PUT uploads of string bodies |
+| `temporary_url.default_expiry` | `3600` | Default PAR lifetime, seconds |
+| `temporary_url.max_expiry` | `86400` | Longest PAR lifetime allowed; longer requests are capped |
+| `passphrase` | – | Passphrase for an encrypted private key |
+
+Retries only apply to idempotent requests and to the POST endpoints that carry an `opc-retry-token` (multipart create/commit, copyObject). A request whose body stream is not seekable is never retried.
+
+### Global setting
+
+| Key | Default | Description |
+|---|---|---|
+| `laravel-oci-driver.global.throw_exceptions` | `true` | When `false`, a failed `temporaryUrl()` is logged and returns `''` instead of throwing |
+
+### Per-write options
+
+Pass these in the `Config` / options array of `put`, `putFile`, `writeStream` and similar:
+
+| Option | Description |
+|---|---|
+| `storage_tier` | Tier for this object |
+| `content_type` | Content type; otherwise detected from the extension, then `application/octet-stream` |
+| `metadata` | Array stored as `opc-meta-*` headers |
+| `checksum` | `false` skips `Content-MD5` for this write |
+
+### `url_path_prefix`
+
+All object names are stored as `prefix/path`. Leading and trailing slashes are normalised and an empty value disables the prefix. Paths returned by listings do **not** include the prefix. A path is treated as already prefixed only if it equals the prefix or starts with `prefix/` (so `localfoo` is not mistaken for being under `local`). Use a static value: expressions such as `date('Y/m')` are frozen by `config:cache`.
+
+---
+
+## Environment variables used by the published config
+
+The `default` connection in `config/laravel-oci-driver.php` reads: `OCI_TENANCY_ID`, `OCI_USER_ID`, `OCI_KEY_FINGERPRINT`, `OCI_KEY_PATH`, `OCI_NAMESPACE`, `OCI_REGION`, `OCI_BUCKET`, `OCI_STORAGE_TIER`, `OCI_TIMEOUT`, `OCI_CONNECT_TIMEOUT`, `OCI_RETRY_ATTEMPTS`, `OCI_RETRY_DELAY`, `OCI_TEMP_URL_EXPIRY`, `OCI_TEMP_URL_MAX_EXPIRY`, `OCI_UPLOAD_CHUNK_SIZE`, `OCI_MULTIPART_THRESHOLD`, `OCI_ENABLE_CHECKSUM`, `OCI_URL_PATH_PREFIX`. The other bundled connections (`production`, `tenant`, `development`, `backup`) are examples that use prefixed variables such as `OCI_PROD_*`.
+
+`OCI_THROW_EXCEPTIONS` feeds `global.throw_exceptions`.
+
+---
+
+## Reserved / currently unused
+
+These keys appear in the config file for forward compatibility but nothing reads them yet, so changing them has no effect on I/O:
+
+- `cache.enabled`, `cache.ttl`, `cache.prefix`
+- `logging.enabled`, `logging.level`, `logging.channel` (only echoed by `oci:config` / `oci:connection` summaries)
+- `global.log_errors`, `global.enable_gzip`, `global.connection_pool_size`, `global.verify_ssl`, `global.user_agent`
+- `content_type.*` (use the per-write `content_type` option instead)
+- `connection_type`
+
+---
+
+## Example
 
 ```php
-// config/filesystems.php (development)
 'oci' => [
     'driver' => 'oci',
-    'bucket' => env('OCI_BUCKET', 'dev-bucket'),
-    'url_path_prefix' => 'development',
-    'debug' => true,
-    'log_level' => 'debug',
-    'options' => [
-        'timeout' => 30,
-        'retry_max' => 3,
-        'cache_metadata' => false, // Disable caching in dev
-    ],
-],
-```
-
-### Production Environment
-
-```php
-// config/filesystems.php (production)
-'oci' => [
-    'driver' => 'oci',
+    'tenancy_id' => env('OCI_TENANCY_ID'),
+    'user_id' => env('OCI_USER_ID'),
+    'key_fingerprint' => env('OCI_KEY_FINGERPRINT'),
+    'private_key_base64' => env('OCI_PRIVATE_KEY_BASE64'),
+    'namespace' => env('OCI_NAMESPACE'),
+    'region' => env('OCI_REGION'),
     'bucket' => env('OCI_BUCKET'),
-    'url_path_prefix' => env('OCI_PREFIX', ''),
-    'debug' => false,
-    'log_level' => 'warning',
-    'options' => [
-        'timeout' => 60,
-        'retry_max' => 5,
-        'cache_metadata' => true,
-        'cache_ttl' => 3600,
-        'multipart_threshold' => 100 * 1024 * 1024, // 100MB
-        'max_concurrent_requests' => 20,
+    'url_path_prefix' => 'uploads',
+    'upload' => [
+        'multipart_threshold' => 100 * 1024 * 1024,
+        'chunk_size' => 32 * 1024 * 1024,   // minimum 10 MiB
     ],
+    'delete_concurrency' => 10,
 ],
 ```
 
----
-
-## Security Configuration
-
-### Key Security
-
-```php
-'oci' => [
-    'driver' => 'oci',
-    // ... other config
-    'security' => [
-        'key_rotation_days' => 90,          // Rotate keys every 90 days
-        'encrypt_at_rest' => true,          // Enable server-side encryption
-        'encryption_key' => env('OCI_ENCRYPTION_KEY'),
-        'allowed_origins' => [              // CORS origins for public buckets
-            'https://example.com',
-            'https://www.example.com',
-        ],
-        'max_file_size' => 500 * 1024 * 1024, // 500MB max file size
-        'allowed_mime_types' => [
-            'application/pdf',
-            'image/jpeg',
-            'image/png',
-            'text/plain',
-        ],
-    ],
-],
-```
-
-### Access Control Configuration
-
-```php
-'oci' => [
-    'driver' => 'oci',
-    // ... other config
-    'access_control' => [
-        'enable_pre_signed_urls' => true,
-        'default_url_expiry' => 3600,       // 1 hour
-        'max_url_expiry' => 86400,          // 24 hours
-        'require_authentication' => true,
-        'role_based_access' => [
-            'admin' => ['read', 'write', 'delete'],
-            'editor' => ['read', 'write'],
-            'viewer' => ['read'],
-        ],
-    ],
-],
-```
-
----
-
-## Configuration Validation
-
-### Using Artisan Commands
-
-```bash
-# Validate current configuration
-php artisan oci:config --validate
-
-# Test connection with current config
-php artisan oci:status
-
-# Interactive configuration setup
-php artisan oci:config
-
-# Setup OCI environment (keys, config, etc.)
-php artisan oci:setup
-```
-
-### Programmatic Validation
-
-```php
-use LaravelOCI\LaravelOciDriver\Config\OciConfig;
-
-$errors = OciConfig::fromConnection('default')->validate();
-
-if ($errors !== []) {
-    foreach ($errors as $error) {
-        Log::error('OCI Configuration Error: ' . $error);
-    }
-}
-```
-
----
-
-## Best Practices
-
-### Security Best Practices
-
-- **Never commit private keys to version control**
-- **Use environment variables for all sensitive configuration**
-- **Set proper file permissions on private keys (600)**
-- **Store private keys outside the web root**
-- **Rotate keys regularly (every 90 days recommended)**
-- **Use different buckets for different environments**
-- **Enable server-side encryption for sensitive data**
-
-### Performance Best Practices
-
-- **Configure appropriate timeouts for your use case**
-- **Use multipart uploads for large files (>100MB)**
-- **Enable metadata caching in production**
-- **Optimize chunk sizes based on your network**
-- **Use CDN for frequently accessed public files**
-- **Monitor and tune concurrent request limits**
-
-### Operational Best Practices
-
-- **Validate configuration in your deployment pipeline**
-- **Use health checks to monitor OCI connectivity**
-- **Set up proper logging and monitoring**
-- **Document your configuration choices**
-- **Test configuration changes in staging first**
-- **Keep backup configurations for rollback**
-
----
-
-## Troubleshooting Common Configuration Issues
-
-### Authentication Issues
-
-```bash
-# Test authentication
-php artisan oci:config --validate
-
-# Check key file permissions
-ls -la /path/to/private-key.pem
-
-# Verify key fingerprint
-openssl rsa -in /path/to/private-key.pem -pubout -outform DER | openssl md5 -c
-```
-
-### Connection Issues
-
-- **Timeout errors**: Increase timeout values in options
-- **SSL verification failures**: Check SSL certificate settings
-- **Network connectivity**: Verify firewall and proxy settings
-- **Region errors**: Ensure region matches your OCI setup
-
-### Configuration Issues
-
-- **Missing required config**: Use `oci:config` command to set missing values
-- **Invalid region or fingerprint**: Double-check for typos and correct format
-- **Key file not found**: Ensure path is correct and accessible
-- **Permission denied**: Check file permissions and process ownership
-- **Wrong storage tier**: Only `Standard`, `InfrequentAccess`, or `Archive` are valid
-
-### Performance Issues
-
-- **Slow uploads**: Adjust chunk size and concurrent requests
-- **Memory issues**: Reduce chunk size for large files
-- **Cache issues**: Clear metadata cache if experiencing stale data
-
----
-
-## Configuration Examples
-
-### Basic Development Setup
-
-```bash
-# .env
-OCI_NAMESPACE=my-namespace
-OCI_REGION=us-phoenix-1
-OCI_BUCKET=dev-bucket
-OCI_TENANCY_OCID=ocid1.tenancy.oc1..example
-OCI_USER_OCID=ocid1.user.oc1..example
-OCI_FINGERPRINT=aa:bb:cc:dd:ee:ff:11:22:33:44:55:66:77:88:99:00
-OCI_PRIVATE_KEY_PATH=/home/app/.oci/private-key.pem
-OCI_PREFIX=development
-OCI_DEBUG=true
-OCI_LOG_LEVEL=debug
-```
-
-### Production Setup
-
-```bash
-# .env
-OCI_NAMESPACE=production-namespace
-OCI_REGION=us-phoenix-1
-OCI_BUCKET=production-storage
-OCI_TENANCY_OCID=ocid1.tenancy.oc1..production
-OCI_USER_OCID=ocid1.user.oc1..production
-OCI_FINGERPRINT=11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff
-OCI_PRIVATE_KEY_PATH=/secure/keys/oci-production-key.pem
-OCI_PREFIX=
-OCI_DEBUG=false
-OCI_LOG_LEVEL=warning
-OCI_HEALTH_CHECK_ENABLED=true
-OCI_LOGGING_ENABLED=true
-```
-
----
-
-## References
-
-- [Installation Guide](INSTALLATION.md)
-- [Authentication Setup](AUTHENTICATION.md)
-- [Troubleshooting Guide](TROUBLESHOOTING.md)
-- [API Reference](API_REFERENCE.md)
-- [Security Guide](SECURITY.md)
-- [Performance Guide](PERFORMANCE.md) 
+See the README for temporary URLs, visibility and the Artisan commands, and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common errors.
