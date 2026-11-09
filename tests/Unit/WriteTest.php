@@ -142,3 +142,19 @@ it('single put failure maps to UnableToWriteFile', function () {
 
     expect(fn () => $fake->adapter()->write('a.txt', 'x', new Config))->toThrow(UnableToWriteFile::class);
 });
+
+it('per write checksum false disables content md5', function () {
+    $fake = FakeOci::make()->queue(new Response(200));
+
+    $fake->adapter()->write('a.txt', 'hello', new Config(['checksum' => false]));
+
+    expect($fake->lastRequest()->hasHeader('content-md5'))->toBeFalse();
+});
+
+it('global enable_checksum false disables content md5', function () {
+    $fake = FakeOci::make(['upload' => ['enable_checksum' => false]])->queue(new Response(200));
+
+    $fake->adapter()->write('a.txt', 'hello', new Config);
+
+    expect($fake->lastRequest()->hasHeader('content-md5'))->toBeFalse();
+});

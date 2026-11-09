@@ -304,7 +304,7 @@ final readonly class OciAdapter implements FilesystemAdapter
             $headers = $this->buildWriteHeaders($path, $config);
 
             if ($size !== null && $size <= (int) $ociConfig->get('upload.multipart_threshold', 104857600)) {
-                if ($checksum && $checksumSource !== null && $ociConfig->get('upload.enable_checksum', true)) {
+                if ($checksum && $checksumSource !== null && $config->get('checksum', true) && $ociConfig->get('upload.enable_checksum', true)) {
                     $headers['Content-MD5'] = base64_encode(md5($checksumSource, true));
                 }
 
