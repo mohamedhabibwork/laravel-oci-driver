@@ -8,7 +8,7 @@ Laravel Flysystem (v3) driver for Oracle Cloud Infrastructure (OCI) Object Stora
 [![Total Downloads](https://img.shields.io/packagist/dt/mohamedhabibwork/laravel-oci-driver.svg?style=flat-square)](https://packagist.org/packages/mohamedhabibwork/laravel-oci-driver)
 [![PHPStan Level](https://img.shields.io/badge/PHPStan-level%208-brightgreen.svg?style=flat-square)](https://phpstan.org/)
 
-Requires PHP 8.2+ (8.3+ with Laravel 13) and Laravel 10, 11, 12 or 13.
+Requires PHP 8.2+ (8.3+ with Laravel 13) and Laravel 11, 12 or 13 (tested in CI). Laravel 10 is allowed by the package constraints but is not tested in CI.
 
 ## Installation
 

@@ -24,4 +24,4 @@ All notable changes to `laravel-oci-driver` will be documented in this file.
 - Private key sources `private_key`, `private_key_base64` and `key_path`, plus `passphrase`.
 - Pooled parallel deletes (`delete_concurrency`), per-write `checksum`, `content_type`, `storage_tier` and `metadata` options.
 - Optional `visibility_mapping`; temporary URL `access_type` option and `temporary_url` expiry settings.
-- CI matrix for PHP 8.2 to 8.5 and Laravel 10 to 13.
+- CI matrix for PHP 8.2 to 8.5 and Laravel 11 to 13 (Laravel 10 stays allowed by the constraints but is not tested in CI).

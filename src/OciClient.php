@@ -23,10 +23,10 @@ use Ramsey\Uuid\Uuid;
 
 final readonly class OciClient
 {
-    /** Object fields requested on listings. */
     /** Name prefix of PARs created by this package (used by the prune command). */
     public const PAR_NAME_PREFIX = 'laravel-oci-';
 
+    /** Object fields requested on listings. */
     public const LIST_FIELDS = 'name,size,timeCreated,timeModified,md5,storageTier';
 
     /**
