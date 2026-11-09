@@ -37,12 +37,12 @@ final class LaravelOciDriverServiceProviderTest extends TestCase
         Log::shouldReceive('error')
             ->once()
             ->with('Failed to create OCI storage driver', [
-                'error' => 'Missing required configuration keys: bucket',
+                'error' => "OCI disk 'oci' is missing: bucket",
                 'config' => $sanitizedConfig,
             ]);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Failed to initialize OCI storage driver: Missing required configuration keys: bucket');
+        $this->expectExceptionMessage("Failed to initialize OCI storage driver: OCI disk 'oci' is missing: bucket");
 
         Storage::disk('oci');
     }

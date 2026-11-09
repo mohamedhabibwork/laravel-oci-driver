@@ -58,7 +58,7 @@ return [
                 'max_expiry' => env('OCI_TEMP_URL_MAX_EXPIRY', 86400), // 24 hours
             ],
             'upload' => [
-                'chunk_size' => env('OCI_UPLOAD_CHUNK_SIZE', 8388608), // 8MB
+                'chunk_size' => env('OCI_UPLOAD_CHUNK_SIZE', 33554432), // 32MB (minimum 10MB)
                 'multipart_threshold' => env('OCI_MULTIPART_THRESHOLD', 104857600), // 100MB
                 'enable_checksum' => env('OCI_ENABLE_CHECKSUM', true),
             ],
@@ -213,7 +213,7 @@ return [
             'region' => env('OCI_BACKUP_REGION'),
             'bucket' => env('OCI_BACKUP_BUCKET'),
             'storage_tier' => env('OCI_BACKUP_STORAGE_TIER', 'Archive'), // Cost-effective for backups
-            'url_path_prefix' => env('OCI_BACKUP_PREFIX', 'backups/'.date('Y/m')), // Organize by date
+            'url_path_prefix' => env('OCI_BACKUP_PREFIX', 'backups/'), // Static prefix: date('Y/m') here would be frozen by config:cache
             'timeout' => env('OCI_BACKUP_TIMEOUT', 120), // Longer timeout for large backups
             'retry_attempts' => env('OCI_BACKUP_RETRY_ATTEMPTS', 3),
             'cache' => [

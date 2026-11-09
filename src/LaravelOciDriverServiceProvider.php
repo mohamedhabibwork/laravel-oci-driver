@@ -63,17 +63,6 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
     }
 
     /**
-     * Bootstrap services after all providers have been registered.
-     */
-    public function boot(): void
-    {
-        parent::boot();
-
-        // Additional boot logic can be added here
-        $this->bootHealthChecks();
-    }
-
-    /**
      * Register the OCI storage driver with Laravel's storage system
      */
     protected function registerOciDriver(): void
@@ -83,9 +72,15 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
         $sanitizeConfigForLogging = $this->sanitizeConfigForLogging(...);
 
         Storage::extend('oci', function ($app, $config) use ($configureTemporaryUrls, $sanitizeConfigForLogging) {
-            // Validate configuration before creating client
-            $ociConfig = OciConfig::fromDisk($config['driver'] ?? 'oci', $config['connection'] ?? 'default');
             try {
+                // The filesystem manager does not pass the disk name to custom creators,
+                // so use `name` if present, else find the disk by its config, else 'oci'.
+                $diskName = $config['name'] ?? array_search($config, (array) $app['config']->get('filesystems.disks', []), true);
+                $diskName = is_string($diskName) ? $diskName : 'oci';
+
+                $ociConfig = OciConfig::fromDiskConfig($config, $diskName);
+                $ociConfig->assertValid($diskName);
+
                 $client = OciClient::createWithConfiguration($ociConfig);
                 $adapter = new OciAdapter($client);
 
@@ -98,7 +93,7 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
                 );
 
                 // Configure temporary URL generation
-                $configureTemporaryUrls($filesystemAdapter, $config);
+                $configureTemporaryUrls($filesystemAdapter, $client);
 
                 return $filesystemAdapter;
             } catch (\Exception $e) {
@@ -122,26 +117,17 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
     /**
      * Configure temporary URL generation for the filesystem adapter.
      *
-     * @param  array<string, mixed>  $config
+     * Reuses the disk's own client, so each disk signs with its own credentials
+     * and no client is built per call.
      */
-    protected function configureTemporaryUrls(FilesystemAdapter $adapter, array $config): void
+    protected function configureTemporaryUrls(FilesystemAdapter $adapter, OciClient $client): void
     {
         $adapter->buildTemporaryUrlsUsing(function (
             string $path,
             \DateTimeInterface $expiresAt,
             array $options = []
-        ) use ($config): string {
+        ) use ($client): string {
             try {
-                // Use the existing config or fall back to the main OCI disk config
-                $ociConfig = $config ?: config('filesystems.disks.oci', []);
-
-                // Validate that we have the required configuration
-                if (empty($ociConfig)) {
-                    throw new \InvalidArgumentException('OCI configuration not found for temporary URL generation');
-                }
-
-                $client = OciClient::createWithConfiguration($ociConfig);
-
                 return $client->createTemporaryUrl($path, Carbon::instance($expiresAt));
             } catch (\Exception $e) {
                 // Log the error if logging is available
@@ -163,85 +149,6 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
     }
 
     /**
-     * Validate OCI configuration before creating the client.
-     *
-     * @param  array<string, mixed>  $config  Configuration array
-     *
-     * @throws \InvalidArgumentException When configuration is invalid
-     */
-    protected function validateOciConfiguration(array $config): void
-    {
-        $requiredKeys = [
-            'namespace',
-            'region',
-            'bucket',
-            'tenancy_id',
-            'user_id',
-            'storage_tier',
-            'key_fingerprint',
-            'key_path',
-        ];
-
-        $missingKeys = array_diff($requiredKeys, array_keys($config));
-
-        if (! empty($missingKeys)) {
-            throw new \InvalidArgumentException(
-                sprintf(
-                    'Missing required OCI configuration keys: %s. Please ensure your .env file contains all required OCI_* variables.',
-                    implode(', ', $missingKeys)
-                )
-            );
-        }
-
-        // Validate specific configuration values
-        $this->validateConfigurationValues($config);
-    }
-
-    /**
-     * Validate specific configuration values.
-     *
-     * @param  array<string, mixed>  $config  Configuration array
-     *
-     * @throws \InvalidArgumentException When configuration values are invalid
-     */
-    protected function validateConfigurationValues(array $config): void
-    {
-        // Skip validation in testing environment
-        if (app()->environment('testing')) {
-            return;
-        }
-
-        // Validate region format
-        if (! preg_match('/^[a-z0-9-]+$/', $config['region'])) {
-            throw new \InvalidArgumentException('Invalid OCI region format');
-        }
-
-        // Validate key fingerprint format
-        if (! preg_match('/^[a-f0-9]{2}(:[a-f0-9]{2}){15}$/i', $config['key_fingerprint'])) {
-            throw new \InvalidArgumentException('Invalid OCI key fingerprint format');
-        }
-
-        // Validate storage tier
-        $validTiers = ['Standard', 'InfrequentAccess', 'Archive'];
-        if (! in_array($config['storage_tier'], $validTiers, true)) {
-            throw new \InvalidArgumentException(
-                sprintf(
-                    'Invalid storage tier: %s. Valid options: %s',
-                    $config['storage_tier'],
-                    implode(', ', $validTiers)
-                )
-            );
-        }
-
-        // Validate key path exists if it's a file path
-        if (! filter_var($config['key_path'], FILTER_VALIDATE_URL) && ! file_exists($config['key_path'])) {
-            throw new \InvalidArgumentException(
-                sprintf('OCI private key file not found: %s', $config['key_path'])
-            );
-        }
-    }
-
-    /**
      * Sanitize configuration for logging (remove sensitive data).
      *
      * @param  array<string, mixed>  $config  Configuration array
@@ -249,7 +156,7 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
      */
     protected function sanitizeConfigForLogging(array $config): array
     {
-        $sensitiveKeys = ['key_path', 'key_fingerprint', 'tenancy_id', 'user_id'];
+        $sensitiveKeys = ['key_path', 'private_key', 'private_key_base64', 'key_fingerprint', 'tenancy_id', 'user_id'];
 
         $sanitized = $config;
         foreach ($sensitiveKeys as $key) {
@@ -259,29 +166,5 @@ final class LaravelOciDriverServiceProvider extends PackageServiceProvider
         }
 
         return $sanitized;
-    }
-
-    /**
-     * Bootstrap health check functionality.
-     */
-    protected function bootHealthChecks(): void
-    {
-        // Register health check if the package is available
-        if (class_exists('\Spatie\Health\Facades\Health')) {
-            // Health check implementation would go here
-            // This is a placeholder for future health check integration
-        }
-    }
-
-    /**
-     * Get the services provided by the provider.
-     *
-     * @return array<string>
-     */
-    public function provides(): array
-    {
-        return [
-            LaravelOciDriver::class,
-        ];
     }
 }

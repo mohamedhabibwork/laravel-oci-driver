@@ -64,18 +64,18 @@ final readonly class OciClient
      */
     private static function validateConfiguration(array $config): void
     {
-        $requiredKeys = [
-            'namespace',
-            'region',
-            'bucket',
-            'tenancy_id',
-            'user_id',
-            'storage_tier',
-            'key_fingerprint',
-            'key_path',
-        ];
+        $missingKeys = array_values(array_filter(
+            ['namespace', 'region', 'bucket', 'tenancy_id', 'user_id', 'key_fingerprint'],
+            static fn (string $key): bool => ! isset($config[$key]) || $config[$key] === '',
+        ));
 
-        $missingKeys = array_diff($requiredKeys, array_keys($config));
+        $hasKey = false;
+        foreach (['private_key', 'private_key_base64', 'key_path'] as $key) {
+            $hasKey = $hasKey || (isset($config[$key]) && $config[$key] !== '');
+        }
+        if (! $hasKey) {
+            $missingKeys[] = 'private_key|private_key_base64|key_path';
+        }
 
         if (! empty($missingKeys)) {
             throw new \InvalidArgumentException(
@@ -300,7 +300,7 @@ final readonly class OciClient
      */
     public function getStorageTier(): StorageTier
     {
-        return StorageTier::fromString($this->config['storage_tier']);
+        return StorageTier::fromString($this->config['storage_tier'] ?? 'Standard');
     }
 
     /**
